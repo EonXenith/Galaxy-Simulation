@@ -1,0 +1,2499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Galaxy Simulation Sandbox</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            space: { 900: '#0a0a1a', 800: '#111128', 700: '#1a1a3e', 600: '#252554' },
+            cosmic: { cyan: '#00d4ff', teal: '#00b8a9', purple: '#8b5cf6', pink: '#ec4899', orange: '#f97316' }
+          }
+        }
+      }
+    }
+  </script>
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Exo 2', sans-serif; background: #0a0a1a; color: #e0e0e0; overflow: hidden; width: 100vw; height: 100vh; }
+    #root { width: 100%; height: 100%; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+    ::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.3); border-radius: 3px; }
+    .glass-panel { background: rgba(10, 10, 30, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(0, 212, 255, 0.15); border-radius: 8px; }
+    .tool-btn { transition: all 0.2s ease; border: 1px solid transparent; }
+    .tool-btn:hover { background: rgba(0, 212, 255, 0.1); border-color: rgba(0, 212, 255, 0.3); }
+    .tool-btn.active { background: rgba(0, 212, 255, 0.15); border-color: rgba(0, 212, 255, 0.5); box-shadow: 0 0 12px rgba(0, 212, 255, 0.2); }
+    .slider-cosmic { -webkit-appearance: none; appearance: none; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; outline: none; }
+    .slider-cosmic::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #00d4ff; cursor: pointer; box-shadow: 0 0 8px rgba(0,212,255,0.5); }
+    .speed-btn { transition: all 0.15s ease; }
+    .speed-btn:hover { background: rgba(0, 212, 255, 0.15); }
+    .speed-btn.active { background: rgba(0, 212, 255, 0.2); color: #00d4ff; }
+    canvas { display: block; }
+    #loading-screen {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #0a0a1a; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 24px;
+      transition: opacity 0.5s ease;
+    }
+    #loading-screen.fade-out { opacity: 0; pointer-events: none; }
+    #loading-screen h1 { font-size: 28px; font-weight: 600; color: #00d4ff; letter-spacing: 2px; }
+    #loading-screen p { font-size: 14px; color: rgba(255,255,255,0.4); }
+    .loader-ring {
+      width: 48px; height: 48px; border: 3px solid rgba(0,212,255,0.15);
+      border-top-color: #00d4ff; border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="loading-screen">
+    <h1>GALAXY SANDBOX</h1>
+    <div class="loader-ring"></div>
+    <p>Initializing simulation...</p>
+  </div>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+
+const { useState, useRef, useEffect, useCallback, useMemo } = React;
+
+// ─── Inline SVG Icons ───
+const ICON_PATHS = {
+  sun: "M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41m12.73-12.73l1.41-1.41M12 6a6 6 0 100 12 6 6 0 000-12z",
+  play: "M6 4l12 8-12 8V4z",
+  pause: "M10 4H6v16h4V4zm8 0h-4v16h4V4z",
+  maximize: "M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3",
+  settings: "M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z M12 8a4 4 0 100 8 4 4 0 000-8z",
+  pointer: "M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z M13 13l6 6",
+  crosshair: "M12 2v4m0 12v4M2 12h4m12 0h4 M12 8a4 4 0 100 8 4 4 0 000-8z",
+  rocket: "M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0 M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5",
+  trash: "M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2 M10 11v6m4-6v6",
+  star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
+  circle: "M12 12m-10 0a10 10 0 1020 0 10 10 0 10-20 0",
+  circleDot: "M12 12m-10 0a10 10 0 1020 0 10 10 0 10-20 0 M12 12m-1 0a1 1 0 102 0 1 1 0 10-2 0",
+  moon: "M12 3a6 6 0 009 9 9 9 0 11-9-9z",
+  dot: "M12 12m-2 0a2 2 0 104 0 2 2 0 10-4 0",
+  orbit: "M12 12m-3 0a3 3 0 106 0 3 3 0 10-6 0 M12 2a10 10 0 010 20 10 10 0 010-20",
+  sparkles: "M9.937 15.5A2 2 0 008.5 14.063l-6.135-1.582a.5.5 0 010-.962L8.5 9.936A2 2 0 009.937 8.5l1.582-6.135a.5.5 0 01.963 0L14.063 8.5A2 2 0 0015.5 9.937l6.135 1.581a.5.5 0 010 .964L15.5 14.063a2 2 0 00-1.437 1.437l-1.582 6.135a.5.5 0 01-.963 0z M20 3v4m2-2h-4 M4 17v2m1-1H3",
+  eye: "M2.062 12.348a1 1 0 010-.696 10.75 10.75 0 0119.876 0 1 1 0 010 .696 10.75 10.75 0 01-19.876 0 M12 12m-3 0a3 3 0 106 0 3 3 0 10-6 0",
+  x: "M18 6L6 18M6 6l12 12",
+  chevDown: "M6 9l6 6 6-6",
+  chevUp: "M18 15l-6-6-6 6",
+  save: "M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z M17 21v-8H7v8 M7 3v5h8",
+  upload: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4 M17 8l-5-5-5 5 M12 3v12",
+  copy: "M20 9h-9a2 2 0 00-2 2v9a2 2 0 002 2h9a2 2 0 002-2v-9a2 2 0 00-2-2z M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1",
+  stop: "M12 12m-10 0a10 10 0 1020 0 10 10 0 10-20 0 M8 12h8",
+};
+
+function Icon({ name, size = 18, className = "" }) {
+  var d = ICON_PATHS[name];
+  if (!d) return null;
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size}
+      viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      className={className} style={{ display: "inline-block", verticalAlign: "middle" }}>
+      <path d={d} />
+    </svg>
+  );
+}
+
+// ─── Constants ───
+var G_DEFAULT = 40;
+var SOFTENING = 0.5;
+var FIXED_DT = 1 / 60;
+var MAX_BODIES = 2000;
+var TRAIL_LENGTH = 120;
+var VEL_CAP = 100;
+var MAX_LIGHTS = 4;
+var STARFIELD_COUNT = 4000;
+
+var BODY_TYPES = {
+  black_hole: { label: "Black Hole", icon: "circleDot", defaultMass: 50000, defaultRadius: 3, color: "#1a0a2e", minMass: 10000, maxMass: 200000, minRadius: 1.5, maxRadius: 8 },
+  star: { label: "Star", icon: "star", defaultMass: 500, defaultRadius: 2.5, color: "#ffdd44", minMass: 50, maxMass: 5000, minRadius: 0.8, maxRadius: 5 },
+  planet_rocky: { label: "Rocky Planet", icon: "circle", defaultMass: 5, defaultRadius: 0.8, color: "#4a90a4", minMass: 0.5, maxMass: 50, minRadius: 0.3, maxRadius: 2 },
+  planet_gas: { label: "Gas Giant", icon: "circle", defaultMass: 30, defaultRadius: 1.8, color: "#c4956a", minMass: 5, maxMass: 200, minRadius: 1, maxRadius: 4 },
+  moon: { label: "Moon", icon: "moon", defaultMass: 0.3, defaultRadius: 0.35, color: "#aaaaaa", minMass: 0.01, maxMass: 2, minRadius: 0.1, maxRadius: 0.8 },
+  asteroid: { label: "Asteroid", icon: "dot", defaultMass: 0.01, defaultRadius: 0.15, color: "#887766", minMass: 0.001, maxMass: 0.5, minRadius: 0.05, maxRadius: 0.3 },
+};
+
+var STAR_COLORS = [
+  { temp: 3000, color: new THREE.Color(1.0, 0.4, 0.2) },
+  { temp: 5000, color: new THREE.Color(1.0, 0.7, 0.3) },
+  { temp: 6000, color: new THREE.Color(1.0, 0.95, 0.8) },
+  { temp: 8000, color: new THREE.Color(0.8, 0.85, 1.0) },
+  { temp: 15000, color: new THREE.Color(0.6, 0.7, 1.0) },
+  { temp: 30000, color: new THREE.Color(0.5, 0.55, 1.0) },
+];
+
+function tempToColor(temp) {
+  for (var i = 0; i < STAR_COLORS.length - 1; i++) {
+    if (temp <= STAR_COLORS[i + 1].temp) {
+      var t = (temp - STAR_COLORS[i].temp) / (STAR_COLORS[i + 1].temp - STAR_COLORS[i].temp);
+      return new THREE.Color().lerpColors(STAR_COLORS[i].color, STAR_COLORS[i + 1].color, Math.max(0, Math.min(1, t)));
+    }
+  }
+  return STAR_COLORS[STAR_COLORS.length - 1].color.clone();
+}
+
+var PLANET_COLORS_ROCKY = ["#6b8e9b", "#a0522d", "#cd853f", "#8fbc8f", "#b0c4de", "#d2691e", "#708090", "#bc8f8f", "#4682b4"];
+var PLANET_COLORS_GAS = ["#daa520", "#cd853f", "#d2b48c", "#f4a460", "#c4956a", "#e8c490", "#8B7355", "#DAA06D"];
+
+var SUBTYPES = {
+  planet_rocky: {
+    earth_like: { label: "Earth-like", color: "#2e86c1" },
+    oceanic:    { label: "Oceanic",    color: "#1a6fa0" },
+    desert:     { label: "Desert",     color: "#d4a04a" },
+    volcanic:   { label: "Volcanic",   color: "#cc3311" },
+    ice:        { label: "Ice World",  color: "#a8d8ea" },
+    barren:     { label: "Barren",     color: "#8a8a8a" },
+  },
+  planet_gas: {
+    jupiter:  { label: "Jupiter-like", color: "#c4956a" },
+    saturn:   { label: "Saturn-like",  color: "#dab882" },
+    neptune:  { label: "Neptune-like", color: "#4488cc" },
+    ice_giant:{ label: "Ice Giant",    color: "#66bbcc" },
+  },
+  moon: {
+    cratered: { label: "Cratered", color: "#aaaaaa" },
+    icy:      { label: "Icy",      color: "#cce8f0" },
+    volcanic: { label: "Volcanic", color: "#aa6644" },
+  },
+  asteroid: {
+    rocky:    { label: "Rocky",    color: "#887766" },
+    metallic: { label: "Metallic", color: "#9999aa" },
+    icy:      { label: "Icy",      color: "#bbccdd" },
+  }
+};
+
+var bodyIdCounter = 0;
+function nextId() { return ++bodyIdCounter; }
+
+// ─── Unit Display ───
+// Scales map simulation values to intuitive real-world-ish units
+// Star mass 500 ≈ 1 Solar Mass, planet mass 5 ≈ 1 Earth Mass, etc.
+var UNIT_SCALES = {
+  mass: {
+    black_hole:   { scale: 500, unit: "M\u2609", decimals: 1 },
+    star:         { scale: 500, unit: "M\u2609", decimals: 2 },
+    planet_rocky: { scale: 5,   unit: "M\u2295", decimals: 2 },
+    planet_gas:   { scale: 5,   unit: "M\u2295", decimals: 1 },
+    moon:         { scale: 0.3, unit: "M\u263D", decimals: 2 },
+    asteroid:     { scale: 0.01,unit: "M\u263D", decimals: 3 },
+  },
+  radius: {
+    black_hole:   { scale: 2.5,  unit: "R\u2609", decimals: 1 },
+    star:         { scale: 2.5,  unit: "R\u2609", decimals: 2 },
+    planet_rocky: { scale: 0.8,  unit: "R\u2295", decimals: 2 },
+    planet_gas:   { scale: 0.8,  unit: "R\u2295", decimals: 2 },
+    moon:         { scale: 0.35, unit: "R\u263D", decimals: 2 },
+    asteroid:     { scale: 0.15, unit: "R\u263D", decimals: 2 },
+  }
+};
+/** Format a simulation value with appropriate real-world unit */
+function fmtUnit(val, field, bodyType) {
+  var s = UNIT_SCALES[field] && UNIT_SCALES[field][bodyType];
+  if (!s) return val.toFixed(2);
+  return (val / s.scale).toFixed(s.decimals) + " " + s.unit;
+}
+
+/** Compute Keplerian orbital elements relative to the dominant (nearest massive) body */
+function computeOrbitalElements(body, bodies, G) {
+  // Find dominant body (most gravitational influence = max M/r²)
+  var bestInfluence = 0, central = null;
+  for (var i = 0; i < bodies.length; i++) {
+    var b = bodies[i];
+    if (b.id === body.id) continue;
+    var dx = b.px - body.px, dy = b.py - body.py, dz = b.pz - body.pz;
+    var r2 = dx * dx + dy * dy + dz * dz;
+    var influence = b.mass / Math.max(r2, 1);
+    if (influence > bestInfluence) { bestInfluence = influence; central = b; }
+  }
+  if (!central) return null;
+  var mu = G * (central.mass + body.mass);
+  var rx = body.px - central.px, ry = body.py - central.py, rz = body.pz - central.pz;
+  var vx = body.vx - central.vx, vy = body.vy - central.vy, vz = body.vz - central.vz;
+  var r = Math.sqrt(rx * rx + ry * ry + rz * rz);
+  var v2 = vx * vx + vy * vy + vz * vz;
+  // Specific energy
+  var energy = v2 / 2 - mu / r;
+  // Semi-major axis (negative for hyperbolic)
+  var a = -mu / (2 * energy);
+  // Angular momentum vector (cross product)
+  var hx = ry * vz - rz * vy, hy = rz * vx - rx * vz, hz = rx * vy - ry * vx;
+  var h = Math.sqrt(hx * hx + hy * hy + hz * hz);
+  // Eccentricity vector
+  var evx = (vy * hz - vz * hy) / mu - rx / r;
+  var evy = (vz * hx - vx * hz) / mu - ry / r;
+  var evz = (vx * hy - vy * hx) / mu - rz / r;
+  var ecc = Math.sqrt(evx * evx + evy * evy + evz * evz);
+  if (ecc >= 1 || a <= 0) return { bound: false, ecc: ecc, centralName: central.name || BODY_TYPES[central.type].label };
+  // Orbital period
+  var period = 2 * Math.PI * Math.sqrt(a * a * a / mu);
+  return {
+    bound: true,
+    semiMajor: a,
+    ecc: ecc,
+    period: period,
+    apoapsis: a * (1 + ecc),
+    periapsis: a * (1 - ecc),
+    centralName: central.name || BODY_TYPES[central.type].label
+  };
+}
+
+// ─── Physics ───
+function computeGravity(bodies, G) {
+  var n = bodies.length;
+  var ax = new Float64Array(n);
+  var ay = new Float64Array(n);
+  var az = new Float64Array(n);
+  for (var i = 0; i < n; i++) {
+    for (var j = i + 1; j < n; j++) {
+      var dx = bodies[j].px - bodies[i].px;
+      var dy = bodies[j].py - bodies[i].py;
+      var dz = bodies[j].pz - bodies[i].pz;
+      // Scale softening with combined mass for very massive pairs (black holes)
+      // This prevents the artificial slingshot from fixed softening at close range
+      var combinedMass = bodies[i].mass + bodies[j].mass;
+      var soft = combinedMass > 5000 ? SOFTENING + Math.log10(combinedMass / 5000) * 3 : SOFTENING;
+      var distSq = dx * dx + dy * dy + dz * dz + soft * soft;
+      var dist = Math.sqrt(distSq);
+      var force = G / (distSq * dist);
+      ax[i] += dx * force * bodies[j].mass;
+      ay[i] += dy * force * bodies[j].mass;
+      az[i] += dz * force * bodies[j].mass;
+      ax[j] -= dx * force * bodies[i].mass;
+      ay[j] -= dy * force * bodies[i].mass;
+      az[j] -= dz * force * bodies[i].mass;
+    }
+  }
+  return { ax: ax, ay: ay, az: az };
+}
+
+// ─── Barnes-Hut O(n log n) gravity ───
+var BH_THETA = 0.5;
+// Flat-array octree: each node is 8 contiguous ints/floats
+// Node: [childStart, totalMass, comX, comY, comZ, bodyIndex, halfSize, _pad]
+var BH_NODE_SIZE = 8;
+var bhNodes = null;
+var bhNodeCount = 0;
+var BH_MAX_NODES = 80000;
+
+function bhReset() {
+  if (!bhNodes || bhNodes.length < BH_MAX_NODES * BH_NODE_SIZE) {
+    bhNodes = new Float64Array(BH_MAX_NODES * BH_NODE_SIZE);
+  }
+  bhNodeCount = 0;
+}
+
+function bhAlloc() {
+  var idx = bhNodeCount++;
+  var off = idx * BH_NODE_SIZE;
+  bhNodes[off] = -1;     // childStart (-1 = no children)
+  bhNodes[off + 1] = 0;  // totalMass
+  bhNodes[off + 2] = 0;  // comX
+  bhNodes[off + 3] = 0;  // comY
+  bhNodes[off + 4] = 0;  // comZ
+  bhNodes[off + 5] = -1; // bodyIndex (-1 = empty)
+  bhNodes[off + 6] = 0;  // halfSize
+  bhNodes[off + 7] = 0;  // centerX (reuse pad for center storage)
+  return idx;
+}
+
+function bhInsert(nodeIdx, bi, bx, by, bz, bmass, cx, cy, cz, half) {
+  if (bhNodeCount >= BH_MAX_NODES - 10) return; // safety
+  var off = nodeIdx * BH_NODE_SIZE;
+  bhNodes[off + 6] = half;
+  bhNodes[off + 7] = cx;
+
+  var existingBody = bhNodes[off + 5];
+  var childStart = bhNodes[off];
+
+  if (existingBody < 0 && childStart < 0) {
+    // Empty leaf — place body here
+    bhNodes[off + 5] = bi;
+    bhNodes[off + 1] = bmass;
+    bhNodes[off + 2] = bx;
+    bhNodes[off + 3] = by;
+    bhNodes[off + 4] = bz;
+    return;
+  }
+
+  // Need to subdivide
+  if (childStart < 0) {
+    // Create 8 children
+    var cs = bhNodeCount;
+    bhNodes[off] = cs;
+    for (var c = 0; c < 8; c++) bhAlloc();
+    childStart = cs;
+
+    // Re-insert existing body into appropriate child
+    var ex = bhNodes[off + 2], ey = bhNodes[off + 3], ez = bhNodes[off + 4];
+    var em = bhNodes[off + 1];
+    var ebi = existingBody;
+    bhNodes[off + 5] = -1;
+    var newHalf = half * 0.5;
+    var octant = (ex > cx ? 1 : 0) | (ey > cy ? 2 : 0) | (ez > cz ? 4 : 0);
+    var ncx = cx + (octant & 1 ? newHalf : -newHalf);
+    var ncy = cy + (octant & 2 ? newHalf : -newHalf);
+    var ncz = cz + (octant & 4 ? newHalf : -newHalf);
+    bhInsert(childStart + octant, ebi, ex, ey, ez, em, ncx, ncy, ncz, newHalf);
+  }
+
+  // Update COM
+  var oldM = bhNodes[off + 1];
+  var newM = oldM + bmass;
+  bhNodes[off + 2] = (bhNodes[off + 2] * oldM + bx * bmass) / newM;
+  bhNodes[off + 3] = (bhNodes[off + 3] * oldM + by * bmass) / newM;
+  bhNodes[off + 4] = (bhNodes[off + 4] * oldM + bz * bmass) / newM;
+  bhNodes[off + 1] = newM;
+
+  // Insert new body into child
+  var newHalf2 = half * 0.5;
+  var octant2 = (bx > cx ? 1 : 0) | (by > cy ? 2 : 0) | (bz > cz ? 4 : 0);
+  var ncx2 = cx + (octant2 & 1 ? newHalf2 : -newHalf2);
+  var ncy2 = cy + (octant2 & 2 ? newHalf2 : -newHalf2);
+  var ncz2 = cz + (octant2 & 4 ? newHalf2 : -newHalf2);
+  bhInsert(bhNodes[off] + octant2, bi, bx, by, bz, bmass, ncx2, ncy2, ncz2, newHalf2);
+}
+
+function bhForce(nodeIdx, bi, bx, by, bz, G, softSq, ax, ay, az) {
+  var off = nodeIdx * BH_NODE_SIZE;
+  var childStart = bhNodes[off];
+  var nm = bhNodes[off + 1];
+  if (nm === 0) return;
+
+  var dx = bhNodes[off + 2] - bx;
+  var dy = bhNodes[off + 3] - by;
+  var dz = bhNodes[off + 4] - bz;
+  var distSq = dx * dx + dy * dy + dz * dz;
+
+  if (childStart < 0) {
+    // Leaf node
+    if (bhNodes[off + 5] === bi) return; // skip self
+    if (distSq < 0.0001) return;
+    var d = Math.sqrt(distSq + softSq);
+    var f = G * nm / (distSq + softSq) / d;
+    ax[0] += dx * f;
+    ay[0] += dy * f;
+    az[0] += dz * f;
+    return;
+  }
+
+  // Internal node — check opening angle
+  var half = bhNodes[off + 6];
+  var size = half * 2;
+  if (size * size < BH_THETA * BH_THETA * distSq) {
+    // Far enough — use COM approximation
+    if (distSq < 0.0001) return;
+    var d = Math.sqrt(distSq + softSq);
+    var f = G * nm / (distSq + softSq) / d;
+    ax[0] += dx * f;
+    ay[0] += dy * f;
+    az[0] += dz * f;
+    return;
+  }
+
+  // Too close — recurse into children
+  for (var c = 0; c < 8; c++) {
+    bhForce(childStart + c, bi, bx, by, bz, G, softSq, ax, ay, az);
+  }
+}
+
+function computeGravityBH(bodies, G) {
+  var n = bodies.length;
+  var axArr = new Float64Array(n);
+  var ayArr = new Float64Array(n);
+  var azArr = new Float64Array(n);
+
+  if (n < 2) return { ax: axArr, ay: ayArr, az: azArr };
+
+  // Find bounding box
+  var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (var i = 0; i < n; i++) {
+    var b = bodies[i];
+    if (b.px < minX) minX = b.px; if (b.px > maxX) maxX = b.px;
+    if (b.py < minY) minY = b.py; if (b.py > maxY) maxY = b.py;
+    if (b.pz < minZ) minZ = b.pz; if (b.pz > maxZ) maxZ = b.pz;
+  }
+  var cx = (minX + maxX) * 0.5, cy = (minY + maxY) * 0.5, cz = (minZ + maxZ) * 0.5;
+  var half = Math.max(maxX - minX, maxY - minY, maxZ - minZ) * 0.5 + 1;
+
+  // Build tree
+  bhReset();
+  var root = bhAlloc();
+  for (var i = 0; i < n; i++) {
+    bhInsert(root, i, bodies[i].px, bodies[i].py, bodies[i].pz, bodies[i].mass, cx, cy, cz, half);
+  }
+
+  // Compute forces
+  for (var i = 0; i < n; i++) {
+    var b = bodies[i];
+    var combinedMass = b.mass;
+    var soft = combinedMass > 5000 ? SOFTENING + Math.log10(combinedMass / 5000) * 3 : SOFTENING;
+    var softSq = soft * soft;
+    var rax = [0], ray = [0], raz = [0];
+    bhForce(root, i, b.px, b.py, b.pz, G, softSq, rax, ray, raz);
+    axArr[i] = rax[0];
+    ayArr[i] = ray[0];
+    azArr[i] = raz[0];
+  }
+  return { ax: axArr, ay: ayArr, az: azArr };
+}
+
+/** Steps physics forward by dt. collisionMode: "merge"|"bounce"|"disabled" */
+function stepPhysics(bodies, dt, G, collisionMode) {
+  if (bodies.length === 0) return { bodies: bodies, collisions: [] };
+  // Velocity Verlet integration (much better energy conservation than Euler)
+  var gravFn = bodies.length > 50 ? computeGravityBH : computeGravity;
+  var acc1 = gravFn(bodies, G);
+  var halfDt = 0.5 * dt;
+  for (var i = 0; i < bodies.length; i++) {
+    var b = bodies[i];
+    b.px += b.vx * dt + acc1.ax[i] * halfDt * dt;
+    b.py += b.vy * dt + acc1.ay[i] * halfDt * dt;
+    b.pz += b.vz * dt + acc1.az[i] * halfDt * dt;
+  }
+  var acc2 = gravFn(bodies, G);
+  for (var i = 0; i < bodies.length; i++) {
+    var b = bodies[i];
+    b.vx += (acc1.ax[i] + acc2.ax[i]) * halfDt;
+    b.vy += (acc1.ay[i] + acc2.ay[i]) * halfDt;
+    b.vz += (acc1.az[i] + acc2.az[i]) * halfDt;
+    // NaN guard: reset corrupted bodies to origin at rest
+    if (b.px !== b.px || b.vx !== b.vx) {
+      b.px = 0; b.py = 0; b.pz = 0; b.vx = 0; b.vy = 0; b.vz = 0;
+    }
+  }
+  // Collisions — skip entirely in disabled mode
+  if (collisionMode === "disabled") return { bodies: bodies, collisions: [] };
+  var toRemove = new Set();
+  var collisions = [];
+  for (var i = 0; i < bodies.length; i++) {
+    if (toRemove.has(i)) continue;
+    for (var j = i + 1; j < bodies.length; j++) {
+      if (toRemove.has(j)) continue;
+      var dx = bodies[j].px - bodies[i].px;
+      var dy = bodies[j].py - bodies[i].py;
+      var dz = bodies[j].pz - bodies[i].pz;
+      var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      var touchDist = (bodies[i].radius + bodies[j].radius) * 0.7;
+      if (dist < touchDist) {
+        if (collisionMode === "bounce") {
+          // Elastic collision with coefficient of restitution = 1.0
+          var nx = dx / Math.max(dist, 0.0001);
+          var ny = dy / Math.max(dist, 0.0001);
+          var nz = dz / Math.max(dist, 0.0001);
+          var dvx = bodies[i].vx - bodies[j].vx;
+          var dvy = bodies[i].vy - bodies[j].vy;
+          var dvz = bodies[i].vz - bodies[j].vz;
+          var dvDotN = dvx * nx + dvy * ny + dvz * nz;
+          if (dvDotN > 0) {
+            var m1 = bodies[i].mass, m2 = bodies[j].mass;
+            var totalM = m1 + m2;
+            var impulse1 = 2 * m2 / totalM * dvDotN;
+            var impulse2 = 2 * m1 / totalM * dvDotN;
+            bodies[i].vx -= impulse1 * nx;
+            bodies[i].vy -= impulse1 * ny;
+            bodies[i].vz -= impulse1 * nz;
+            bodies[j].vx += impulse2 * nx;
+            bodies[j].vy += impulse2 * ny;
+            bodies[j].vz += impulse2 * nz;
+            // Separate bodies so surfaces are exactly touching
+            var overlap = touchDist - dist;
+            var sep = overlap / 2 + 0.01;
+            bodies[i].px -= sep * nx;
+            bodies[i].py -= sep * ny;
+            bodies[i].pz -= sep * nz;
+            bodies[j].px += sep * nx;
+            bodies[j].py += sep * ny;
+            bodies[j].pz += sep * nz;
+          }
+        } else {
+          // Merge mode (default)
+          var ki = bodies[i].mass >= bodies[j].mass ? i : j;
+          var ri = ki === i ? j : i;
+          var a = bodies[ki], bm = bodies[ri];
+          // Snapshot both bodies before mutation for unmerge support
+          var survivorSnap = { id: a.id, type: a.type, mass: a.mass, radius: a.radius, px: a.px, py: a.py, pz: a.pz, vx: a.vx, vy: a.vy, vz: a.vz, color: a.color, temperature: a.temperature, subtype: a.subtype, diskSpeed: a.diskSpeed, name: a.name };
+          var absorbedSnap = { id: bm.id, type: bm.type, mass: bm.mass, radius: bm.radius, px: bm.px, py: bm.py, pz: bm.pz, vx: bm.vx, vy: bm.vy, vz: bm.vz, color: bm.color, temperature: bm.temperature, subtype: bm.subtype, diskSpeed: bm.diskSpeed, name: bm.name };
+          var totalMass = a.mass + bm.mass;
+          var relVx = a.vx - bm.vx, relVy = a.vy - bm.vy, relVz = a.vz - bm.vz;
+          var energy = Math.sqrt(relVx * relVx + relVy * relVy + relVz * relVz) * bm.mass;
+          collisions.push({ x: bm.px, y: bm.py, z: bm.pz, color: bm.color, energy: energy, survivorSnap: survivorSnap, absorbedSnap: absorbedSnap });
+          a.vx = (a.vx * a.mass + bm.vx * bm.mass) / totalMass;
+          a.vy = (a.vy * a.mass + bm.vy * bm.mass) / totalMass;
+          a.vz = (a.vz * a.mass + bm.vz * bm.mass) / totalMass;
+          a.mass = totalMass;
+          a.radius = Math.cbrt(Math.pow(a.radius, 3) + Math.pow(bm.radius, 3));
+          toRemove.add(ri);
+        }
+      }
+    }
+  }
+  if (toRemove.size > 0) return { bodies: bodies.filter(function(_, i) { return !toRemove.has(i); }), collisions: collisions };
+  return { bodies: bodies, collisions: collisions };
+}
+
+// ─── Scenario Presets ───
+var SCENARIO_PRESETS = [
+  {
+    name: "Earth & Moon",
+    icon: "orbit",
+    description: "A star with one planet and its moon",
+    generate: function(G) {
+      var bodies = [];
+      var starMass = 500, planetMass = 3, moonMass = 0.02;
+      // Place star and planet around their common center of mass
+      var pDist = 50;
+      var starV = Math.sqrt(G * planetMass * planetMass / ((starMass + planetMass) * pDist));
+      var planetV = Math.sqrt(G * starMass * starMass / ((starMass + planetMass) * pDist));
+      var starOff = pDist * planetMass / (starMass + planetMass);
+      bodies.push(createBody("star", starMass, 2.5, -starOff, 0, 0, 0, 0, -starV, { temperature: 5800 }));
+      var planetX = pDist - starOff;
+      bodies.push(createBody("planet_rocky", planetMass, 0.9, planetX, 0, 0, 0, 0, planetV, { color: "#4a90d9", subtype: "oceanic" }));
+      // Moon orbits planet — Hill sphere radius ≈ pDist * (planetMass / (3*starMass))^(1/3)
+      // Moon must orbit well within Hill sphere for stability
+      var hillRadius = pDist * Math.pow(planetMass / (3 * starMass), 1/3);
+      var mDist = hillRadius * 0.35;
+      var moonV = Math.sqrt(G * planetMass / mDist) + planetV;
+      bodies.push(createBody("moon", moonMass, 0.2, planetX + mDist, 0, 0, 0, 0, moonV));
+      return { bodies: bodies, camDist: 80 };
+    }
+  },
+  {
+    name: "Jupiter System",
+    icon: "circle",
+    description: "Gas giant with four moons",
+    generate: function(G) {
+      var bodies = [];
+      var starMass = 600, jupMass = 50;
+      var jDist = 65;
+      var starV = Math.sqrt(G * jupMass * jupMass / ((starMass + jupMass) * jDist));
+      var jupV = Math.sqrt(G * starMass * starMass / ((starMass + jupMass) * jDist));
+      var starOff = jDist * jupMass / (starMass + jupMass);
+      bodies.push(createBody("star", starMass, 2.5, -starOff, 0, 0, 0, 0, -starV, { temperature: 5800 }));
+      var jupX = jDist - starOff;
+      bodies.push(createBody("planet_gas", jupMass, 2.2, jupX, 0, 0, 0, 0, jupV, { color: "#d4a46a" }));
+      // Hill sphere for Jupiter around star
+      var hillRadius = jDist * Math.pow(jupMass / (3 * starMass), 1/3);
+      // Place moons well within Hill sphere (< 0.5 * Hill)
+      var moonDists = [hillRadius * 0.15, hillRadius * 0.22, hillRadius * 0.30, hillRadius * 0.40];
+      var moonColors = ["#c4a882", "#aaaaaa", "#8899aa", "#bb9966"];
+      var moonMasses = [0.01, 0.02, 0.015, 0.01];
+      for (var i = 0; i < 4; i++) {
+        var md = moonDists[i];
+        var mv = Math.sqrt(G * jupMass / md) + jupV;
+        bodies.push(createBody("moon", moonMasses[i], 0.12 + i * 0.03, jupX + md, 0, 0, 0, 0, mv, { color: moonColors[i] }));
+      }
+      return { bodies: bodies, camDist: 110 };
+    }
+  },
+  {
+    name: "Binary Stars",
+    icon: "star",
+    description: "Two stars orbiting each other with planets",
+    generate: function(G) {
+      var bodies = [];
+      var m1 = 400, m2 = 350;
+      var sep = 14;
+      var totalM = m1 + m2;
+      // Correct binary orbit: each star orbits the center of mass
+      var r1 = sep * m2 / totalM;
+      var r2 = sep * m1 / totalM;
+      var v1 = Math.sqrt(G * m2 * r1 / (sep * sep));
+      var v2 = Math.sqrt(G * m1 * r2 / (sep * sep));
+      bodies.push(createBody("star", m1, 2.2, -r1, 0, 0, 0, 0, v1, { temperature: 8000 }));
+      bodies.push(createBody("star", m2, 1.9, r2, 0, 0, 0, 0, -v2, { temperature: 4200 }));
+      // Circumbinary planets - far enough out for stability
+      var planetDists = [40, 60, 85];
+      for (var i = 0; i < planetDists.length; i++) {
+        var pd = planetDists[i];
+        var ps = Math.sqrt(G * totalM / pd);
+        var angle = i * Math.PI * 2 / 3;
+        var px = Math.cos(angle) * pd;
+        var pz = Math.sin(angle) * pd;
+        var vx = -Math.sin(angle) * ps;
+        var vz = Math.cos(angle) * ps;
+        bodies.push(createBody(i === 2 ? "planet_gas" : "planet_rocky", 3 + i * 4, 0.5 + i * 0.3, px, 0, pz, vx, 0, vz));
+      }
+      return { bodies: bodies, camDist: 140 };
+    }
+  },
+  {
+    name: "Galaxy Collision",
+    icon: "sparkles",
+    description: "Two small galaxies on a collision course",
+    generate: function(G) {
+      var bodies = [];
+      var bh1Mass = 30000, bh2Mass = 25000;
+      // Grazing trajectory: offset laterally so they spiral into each other
+      // instead of bouncing head-on. Low approach speed lets gravity do the work.
+      bodies.push(createBody("black_hole", bh1Mass, 2.5, -120, 0, -30, 2.0, 0, 0.8));
+      for (var i = 0; i < 80; i++) {
+        var d = 10 + Math.random() * 60;
+        var a = Math.random() * Math.PI * 2;
+        var x = -120 + Math.cos(a) * d;
+        var z = -30 + Math.sin(a) * d;
+        var y = (Math.random() - 0.5) * d * 0.05;
+        var os = Math.sqrt(G * bh1Mass / Math.max(d, 10)) * 0.7;
+        var vx = 2.0 + -Math.sin(a) * os;
+        var vz = 0.8 + Math.cos(a) * os;
+        var t = 3000 + Math.random() * 27000;
+        bodies.push(createBody("star", 1 + Math.random() * 5, 0.3 + Math.random() * 0.8, x, y, z, vx, 0, vz, { temperature: t }));
+      }
+      // Second galaxy approaches from offset angle — not head-on
+      bodies.push(createBody("black_hole", bh2Mass, 2.2, 120, 0, 50, -1.8, 0, -0.5));
+      for (var i = 0; i < 60; i++) {
+        var d = 10 + Math.random() * 50;
+        var a = Math.random() * Math.PI * 2;
+        var x = 120 + Math.cos(a) * d;
+        var z = 50 + Math.sin(a) * d;
+        var y = (Math.random() - 0.5) * d * 0.05;
+        var os = Math.sqrt(G * bh2Mass / Math.max(d, 10)) * 0.7;
+        var vx = -1.8 + -Math.sin(a) * os;
+        var vz = -0.5 + Math.cos(a) * os;
+        var t = 3000 + Math.random() * 27000;
+        bodies.push(createBody("star", 1 + Math.random() * 5, 0.3 + Math.random() * 0.8, x, y, z, vx, 0, vz, { temperature: t }));
+      }
+      return { bodies: bodies, camDist: 450 };
+    }
+  },
+  {
+    name: "Asteroid Belt",
+    icon: "dot",
+    description: "Star with a dense ring of ~200 asteroids",
+    generate: function(G) {
+      var bodies = [];
+      var starMass = 500;
+      bodies.push(createBody("star", starMass, 2.5, 0, 0, 0, 0, 0, 0, { temperature: 5800 }));
+      // Inner rocky planet — small mass, well separated from belt
+      var ip = 20;
+      var ips = Math.sqrt(G * starMass / ip);
+      bodies.push(createBody("planet_rocky", 3, 0.7, ip, 0, 0, 0, 0, ips, { subtype: "earth_like" }));
+      // Asteroid belt — wide gap from inner planet, tiny masses to avoid self-interaction
+      for (var i = 0; i < 200; i++) {
+        var d = 42 + Math.random() * 18;
+        var a = Math.random() * Math.PI * 2;
+        var x = Math.cos(a) * d;
+        var z = Math.sin(a) * d;
+        var y = (Math.random() - 0.5) * 0.5;
+        var os = Math.sqrt(G * starMass / d);
+        var vx = -Math.sin(a) * os;
+        var vz = Math.cos(a) * os;
+        bodies.push(createBody("asteroid", 0.0001 + Math.random() * 0.001, 0.06 + Math.random() * 0.1, x, y, z, vx, 0, vz));
+      }
+      // Outer gas giant — well separated from belt
+      var op = 80;
+      var ops = Math.sqrt(G * starMass / op);
+      bodies.push(createBody("planet_gas", 25, 1.6, op, 0, 0, 0, 0, ops));
+      return { bodies: bodies, camDist: 130 };
+    }
+  },
+  {
+    name: "Two Body Orbit",
+    icon: "circleDot",
+    description: "Simple two-body system: star and planet",
+    generate: function(G) {
+      var bodies = [];
+      var starMass = 400, planetMass = 10;
+      var dist = 35;
+      var totalM = starMass + planetMass;
+      var starR = dist * planetMass / totalM;
+      var planetR = dist * starMass / totalM;
+      var starV = Math.sqrt(G * planetMass * starR / (dist * dist));
+      var planetV = Math.sqrt(G * starMass * planetR / (dist * dist));
+      bodies.push(createBody("star", starMass, 2.5, -starR, 0, 0, 0, 0, -starV, { temperature: 6000 }));
+      bodies.push(createBody("planet_rocky", planetMass, 1.0, planetR, 0, 0, 0, 0, planetV, { color: "#d2691e", subtype: "desert" }));
+      return { bodies: bodies, camDist: 65 };
+    }
+  },
+  {
+    name: "Stable Solar System",
+    icon: "orbit",
+    description: "Well-spaced 6-planet system with correct orbits",
+    generate: function(G) {
+      var bodies = [];
+      var starMass = 500;
+      bodies.push(createBody("star", starMass, 2.5, 0, 0, 0, 0, 0, 0, { temperature: 5800 }));
+      // Reduced planet masses (especially gas giants) and wider spacing ratios
+      // Adjacent planet distance ratio > 2 for stability (Gladman criterion)
+      var planets = [
+        { dist: 15, mass: 0.5, r: 0.4, type: "planet_rocky", sub: "volcanic", color: "#cc5533" },
+        { dist: 28, mass: 1.5, r: 0.6, type: "planet_rocky", sub: "desert", color: "#d2a060" },
+        { dist: 45, mass: 2, r: 0.7, type: "planet_rocky", sub: "oceanic", color: "#3388cc" },
+        { dist: 70, mass: 1, r: 0.5, type: "planet_rocky", sub: "ice", color: "#aaccee" },
+        { dist: 110, mass: 20, r: 1.8, type: "planet_gas", sub: "jupiter", color: "#c4956a" },
+        { dist: 170, mass: 10, r: 1.4, type: "planet_gas", sub: "saturn", color: "#dab882" },
+      ];
+      // Randomize starting angles so planets aren't in resonant alignment
+      var baseAngle = Math.random() * Math.PI * 2;
+      for (var i = 0; i < planets.length; i++) {
+        var p = planets[i];
+        var angle = baseAngle + i * 1.37;  // golden-ratio-like spacing avoids resonance
+        var px = Math.cos(angle) * p.dist;
+        var pz = Math.sin(angle) * p.dist;
+        var v = Math.sqrt(G * starMass / p.dist);
+        var vx = -Math.sin(angle) * v;
+        var vz = Math.cos(angle) * v;
+        bodies.push(createBody(p.type, p.mass, p.r, px, 0, pz, vx, 0, vz, { color: p.color, subtype: p.sub }));
+      }
+      return { bodies: bodies, camDist: 250 };
+    }
+  },
+  {
+    name: "Three Body System",
+    icon: "star",
+    description: "Three stars in chaotic orbit — different every time",
+    generate: function(G) {
+      var bodies = [];
+      var m1 = 300 + Math.random() * 200;
+      var m2 = 300 + Math.random() * 200;
+      var m3 = 300 + Math.random() * 200;
+      var temps = [6000 + Math.random() * 15000, 4000 + Math.random() * 8000, 3500 + Math.random() * 6000];
+      // Place three stars in a triangle with random perturbation
+      // Start near a Lagrange-like configuration but perturbed so chaos develops
+      var baseR = 18 + Math.random() * 8;
+      var angles = [0, Math.PI * 2 / 3, Math.PI * 4 / 3];
+      // Random perturbation to angles and distances — ensures chaos
+      for (var k = 0; k < 3; k++) {
+        angles[k] += (Math.random() - 0.5) * 0.6;
+      }
+      var masses = [m1, m2, m3];
+      var totalMass = m1 + m2 + m3;
+      var positions = [];
+      var velocities = [];
+      // Place stars and compute circular-ish velocities around center of mass
+      for (var k = 0; k < 3; k++) {
+        var r = baseR + (Math.random() - 0.5) * 6;
+        var px = Math.cos(angles[k]) * r;
+        var pz = Math.sin(angles[k]) * r;
+        positions.push({ x: px, z: pz });
+      }
+      // Center of mass correction
+      var cmx = 0, cmz = 0;
+      for (var k = 0; k < 3; k++) {
+        cmx += positions[k].x * masses[k];
+        cmz += positions[k].z * masses[k];
+      }
+      cmx /= totalMass; cmz /= totalMass;
+      for (var k = 0; k < 3; k++) {
+        positions[k].x -= cmx;
+        positions[k].z -= cmz;
+      }
+      // Compute velocity for each star: tangential to COM, magnitude from virial-ish estimate
+      for (var k = 0; k < 3; k++) {
+        var r = Math.sqrt(positions[k].x * positions[k].x + positions[k].z * positions[k].z);
+        var otherMass = totalMass - masses[k];
+        var speed = Math.sqrt(G * otherMass / Math.max(r, 5)) * (0.55 + Math.random() * 0.15);
+        var angle = Math.atan2(positions[k].z, positions[k].x);
+        velocities.push({ x: -Math.sin(angle) * speed, z: Math.cos(angle) * speed });
+      }
+      // Zero net momentum
+      var mvx = 0, mvz = 0;
+      for (var k = 0; k < 3; k++) {
+        mvx += velocities[k].x * masses[k];
+        mvz += velocities[k].z * masses[k];
+      }
+      for (var k = 0; k < 3; k++) {
+        velocities[k].x -= mvx / totalMass;
+        velocities[k].z -= mvz / totalMass;
+      }
+      var radii = [1.6 + Math.random() * 0.6, 1.4 + Math.random() * 0.6, 1.2 + Math.random() * 0.6];
+      for (var k = 0; k < 3; k++) {
+        bodies.push(createBody("star", masses[k], radii[k],
+          positions[k].x, 0, positions[k].z,
+          velocities[k].x, 0, velocities[k].z,
+          { temperature: temps[k] }));
+      }
+      return { bodies: bodies, camDist: 80 };
+    }
+  }
+];
+
+// ─── Collision Explosions ───
+function createExplosion(x, y, z, color, energy) {
+  var count = 64;
+  var pos = new Float32Array(count * 3);
+  var vel = new Float32Array(count * 3);
+  var speed = Math.min(Math.sqrt(energy) * 0.5, 30);
+  for (var i = 0; i < count; i++) {
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+    var th = Math.random() * Math.PI * 2;
+    var ph = Math.acos(2 * Math.random() - 1);
+    var s = (0.3 + Math.random() * 0.7) * speed;
+    vel[i * 3] = Math.sin(ph) * Math.cos(th) * s;
+    vel[i * 3 + 1] = Math.sin(ph) * Math.sin(th) * s;
+    vel[i * 3 + 2] = Math.cos(ph) * s;
+  }
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  var c = new THREE.Color(color);
+  var mat = new THREE.PointsMaterial({ size: 1.5, color: c, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+  var points = new THREE.Points(geo, mat);
+  return { points: points, vel: vel, age: 0, lifetime: 1.5 };
+}
+
+// ─── Trajectory Prediction ───
+function computeTrajectory(bodies, targetId, steps, dt, G) {
+  var idx = -1;
+  var n = bodies.length;
+  var px = new Float64Array(n), py = new Float64Array(n), pz = new Float64Array(n);
+  var vx = new Float64Array(n), vy = new Float64Array(n), vz = new Float64Array(n);
+  var mass = new Float64Array(n);
+  var radius = new Float64Array(n);
+  for (var i = 0; i < n; i++) {
+    px[i] = bodies[i].px; py[i] = bodies[i].py; pz[i] = bodies[i].pz;
+    vx[i] = bodies[i].vx; vy[i] = bodies[i].vy; vz[i] = bodies[i].vz;
+    mass[i] = bodies[i].mass;
+    radius[i] = bodies[i].radius;
+    if (bodies[i].id === targetId) idx = i;
+  }
+  if (idx < 0) return [];
+  var path = [{ x: px[idx], y: py[idx], z: pz[idx] }];
+  for (var s = 0; s < steps; s++) {
+    var ax = 0, ay = 0, az = 0;
+    for (var j = 0; j < n; j++) {
+      if (j === idx) continue;
+      var ddx = px[j] - px[idx], ddy = py[j] - py[idx], ddz = pz[j] - pz[idx];
+      var distSq = ddx * ddx + ddy * ddy + ddz * ddz + SOFTENING * SOFTENING;
+      var dist = Math.sqrt(distSq);
+      var force = G / (distSq * dist);
+      ax += ddx * force * mass[j];
+      ay += ddy * force * mass[j];
+      az += ddz * force * mass[j];
+    }
+    vx[idx] += ax * dt; vy[idx] += ay * dt; vz[idx] += az * dt;
+    px[idx] += vx[idx] * dt; py[idx] += vy[idx] * dt; pz[idx] += vz[idx] * dt;
+    path.push({ x: px[idx], y: py[idx], z: pz[idx] });
+    // Terminate at collision
+    for (var j = 0; j < n; j++) {
+      if (j === idx) continue;
+      var cdx = px[j] - px[idx], cdy = py[j] - py[idx], cdz = pz[j] - pz[idx];
+      var cd = Math.sqrt(cdx * cdx + cdy * cdy + cdz * cdz);
+      if (cd < (radius[idx] + radius[j]) * 0.7) return path;
+    }
+  }
+  return path;
+}
+
+// ─── Body Helpers ───
+function createBody(type, mass, radius, px, py, pz, vx, vy, vz, extra) {
+  extra = extra || {};
+  var cfg = BODY_TYPES[type];
+  var color = extra.color || cfg.color;
+  var temperature = extra.temperature || 5500;
+  var subtype = extra.subtype || null;
+  var diskSpeed = extra.diskSpeed || 0.008;
+  if (type === "star") {
+    temperature = extra.temperature || 3000 + Math.random() * 27000;
+    color = "#" + tempToColor(temperature).getHexString();
+  } else if (type === "planet_rocky") {
+    if (!subtype) {
+      var keys = Object.keys(SUBTYPES.planet_rocky);
+      subtype = keys[Math.floor(Math.random() * keys.length)];
+    }
+    color = extra.color || SUBTYPES.planet_rocky[subtype].color;
+  } else if (type === "planet_gas") {
+    if (!subtype) {
+      var keys = Object.keys(SUBTYPES.planet_gas);
+      subtype = keys[Math.floor(Math.random() * keys.length)];
+    }
+    color = extra.color || SUBTYPES.planet_gas[subtype].color;
+  } else if (type === "moon") {
+    if (!subtype) {
+      var keys = Object.keys(SUBTYPES.moon);
+      subtype = keys[Math.floor(Math.random() * keys.length)];
+    }
+    color = extra.color || SUBTYPES.moon[subtype].color;
+  } else if (type === "asteroid") {
+    if (!subtype) {
+      var keys = Object.keys(SUBTYPES.asteroid);
+      subtype = keys[Math.floor(Math.random() * keys.length)];
+    }
+    color = extra.color || SUBTYPES.asteroid[subtype].color;
+  }
+  return { id: nextId(), type: type, mass: mass, radius: radius, px: px, py: py, pz: pz, vx: vx || 0, vy: vy || 0, vz: vz || 0, color: color, temperature: temperature, subtype: subtype, diskSpeed: diskSpeed, name: extra.name || "", trail: [] };
+}
+
+function generateSolarSystem(cx, cy, cz, cvx, cvy, cvz, G) {
+  var bodies = [];
+  var starMass = 300 + Math.random() * 700;
+  var starTemp = 3500 + Math.random() * 20000;
+  bodies.push(createBody("star", starMass, 2 + Math.random() * 1.5, cx, cy, cz, cvx || 0, cvy || 0, cvz || 0, { temperature: starTemp, color: "#" + tempToColor(starTemp).getHexString() }));
+  var numPlanets = 3 + Math.floor(Math.random() * 6);
+  for (var i = 0; i < numPlanets; i++) {
+    var dist = 15 + i * (8 + Math.random() * 6);
+    var angle = Math.random() * Math.PI * 2;
+    var isGas = i >= numPlanets - 2 && Math.random() > 0.3;
+    var type = isGas ? "planet_gas" : "planet_rocky";
+    var cfg = BODY_TYPES[type];
+    var mass = cfg.defaultMass * (0.5 + Math.random());
+    var radius = cfg.defaultRadius * (0.6 + Math.random() * 0.8);
+    var px = cx + Math.cos(angle) * dist;
+    var pz = cz + Math.sin(angle) * dist;
+    var py = cy;
+    var orbitalSpeed = Math.sqrt((G * starMass) / dist);
+    var vx = (cvx || 0) + -Math.sin(angle) * orbitalSpeed;
+    var vz = (cvz || 0) + Math.cos(angle) * orbitalSpeed;
+    bodies.push(createBody(type, mass, radius, px, py, pz, vx, cvy || 0, vz));
+    if (Math.random() > 0.5) {
+      var numMoons = 1 + Math.floor(Math.random() * 2);
+      for (var m = 0; m < numMoons; m++) {
+        var moonDist = radius * 3 + m * 2 + Math.random() * 2;
+        var moonAngle = Math.random() * Math.PI * 2;
+        var mpx = px + Math.cos(moonAngle) * moonDist;
+        var mpz = pz + Math.sin(moonAngle) * moonDist;
+        var moonSpeed = Math.sqrt((G * mass) / moonDist);
+        var mvx = vx + -Math.sin(moonAngle) * moonSpeed;
+        var mvz = vz + Math.cos(moonAngle) * moonSpeed;
+        bodies.push(createBody("moon", 0.05 + Math.random() * 0.3, 0.15 + Math.random() * 0.25, mpx, py, mpz, mvx, 0, mvz));
+      }
+    }
+  }
+  return bodies;
+}
+
+function generateGalaxy(cx, cy, cz, G) {
+  var bodies = [];
+  var bhMass = 80000 + Math.random() * 40000;
+  bodies.push(createBody("black_hole", bhMass, 3.5, cx, cy, cz, 0, 0, 0));
+  var numStars = 250 + Math.floor(Math.random() * 150);
+  var numArms = 2 + Math.floor(Math.random() * 3);
+  var armSpread = 0.4 + Math.random() * 0.3;
+  for (var i = 0; i < numStars; i++) {
+    var arm = i % numArms;
+    var armAngle = (arm / numArms) * Math.PI * 2;
+    var distance = 20 + Math.random() * 450;
+    var angle = armAngle + Math.log(distance + 1) * 1.2 + (Math.random() - 0.5) * armSpread;
+    var x = cx + Math.cos(angle) * distance;
+    var z = cz + Math.sin(angle) * distance;
+    var y = cy + (Math.random() - 0.5) * distance * 0.06;
+    var orbitalSpeed = Math.sqrt((G * bhMass) / Math.max(distance, 10)) * 0.85;
+    var vx = -Math.sin(angle) * orbitalSpeed;
+    var vz = Math.cos(angle) * orbitalSpeed;
+    var temp = 3000 + Math.random() * 27000;
+    bodies.push(createBody("star", 1 + Math.random() * 8, 0.4 + Math.random() * 1.2, x, y, z, vx, 0, vz, { temperature: temp, color: "#" + tempToColor(temp).getHexString() }));
+  }
+  return bodies;
+}
+
+// ─── Three.js Scene ───
+class SceneManager {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.contextLost = false;
+
+    // Set canvas size before requesting context
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Register context loss handlers BEFORE creating WebGL context
+    canvas.addEventListener("webglcontextlost", function(e) { e.preventDefault(); this.contextLost = true; console.warn("WebGL context lost - will restore"); }.bind(this));
+    canvas.addEventListener("webglcontextrestored", function() { this.contextLost = false; console.log("WebGL context restored"); }.bind(this));
+
+    // Manually acquire WebGL context with low-power preference for Safari compatibility
+    var glAttrs = { alpha: false, antialias: true, powerPreference: "low-power", failIfMajorPerformanceCaveat: false, preserveDrawingBuffer: false };
+    var gl = canvas.getContext("webgl2", glAttrs) || canvas.getContext("webgl", glAttrs);
+    if (!gl || gl.isContextLost()) {
+      throw new Error("Your browser could not create a WebGL context. Close other browser tabs (especially those with 3D/maps/video) and try again.");
+    }
+
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100000);
+    this.camera.position.set(0, 80, 120);
+    this.camera.lookAt(0, 0, 0);
+    this.renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl });
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.scene.add(new THREE.AmbientLight(0x445577, 1.6));
+    this.scene.add(new THREE.HemisphereLight(0x6688bb, 0x222244, 0.4));
+
+    this.bodyMeshes = new Map();
+    this.glowSprites = new Map();
+    this.trailLines = new Map();
+    this.accretionDisks = new Map();
+    this.pointLights = new Map();
+    this.labelSprites = new Map();
+    this.sphereGeoHigh = new THREE.SphereGeometry(1, 32, 24);
+    this.sphereGeo = new THREE.SphereGeometry(1, 24, 16);
+    this.lowSphereGeo = new THREE.SphereGeometry(1, 8, 6);
+    this.glowTexture = this._makeGlowTex();
+    this._makeStarfield();
+    this._makeLaunchArrow();
+    this._makeSelRing();
+    this.raycaster = new THREE.Raycaster();
+    this.camTarget = new THREE.Vector3(0, 0, 0);
+    this.camDist = 150;
+    this.camPhi = Math.PI / 4;
+    this.camTheta = 0;
+    this.followId = null;
+    this.explosions = [];
+    this._makeTrajectoryLine();
+    this._updateCam();
+  }
+
+  _makeGlowTex() {
+    var s = 128, c = document.createElement("canvas");
+    c.width = s; c.height = s;
+    var ctx = c.getContext("2d");
+    var g = ctx.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.1, "rgba(255,255,255,0.8)");
+    g.addColorStop(0.3, "rgba(255,220,150,0.3)");
+    g.addColorStop(0.6, "rgba(255,150,50,0.05)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    return new THREE.CanvasTexture(c);
+  }
+
+  _makeLabelTex(text) {
+    var c = document.createElement("canvas");
+    var ctx = c.getContext("2d");
+    var fontSize = 48;
+    ctx.font = "bold " + fontSize + "px 'Exo 2', sans-serif";
+    var metrics = ctx.measureText(text);
+    var w = Math.ceil(metrics.width) + 16;
+    var h = fontSize + 16;
+    c.width = w; c.height = h;
+    ctx.font = "bold " + fontSize + "px 'Exo 2', sans-serif";
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, w / 2, h / 2);
+    var tex = new THREE.CanvasTexture(c);
+    tex.minFilter = THREE.LinearFilter;
+    return { texture: tex, aspect: w / h };
+  }
+
+  _makeStarfield() {
+    var pos = new Float32Array(STARFIELD_COUNT * 3);
+    var col = new Float32Array(STARFIELD_COUNT * 3);
+    for (var i = 0; i < STARFIELD_COUNT; i++) {
+      var th = Math.random() * Math.PI * 2;
+      var ph = Math.acos(2 * Math.random() - 1);
+      var r = 15000 + Math.random() * 35000;
+      pos[i*3] = r * Math.sin(ph) * Math.cos(th);
+      pos[i*3+1] = r * Math.sin(ph) * Math.sin(th);
+      pos[i*3+2] = r * Math.cos(ph);
+      var br = 0.3 + Math.random() * 0.7;
+      var ti = Math.random();
+      col[i*3] = br * (ti > 0.95 ? 1 : ti > 0.9 ? 0.6 : 1);
+      col[i*3+1] = br * (ti > 0.95 ? 0.7 : ti > 0.9 ? 0.7 : 1);
+      col[i*3+2] = br * (ti > 0.95 ? 0.5 : ti > 0.9 ? 1 : 1);
+    }
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    this.scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false })));
+  }
+
+  _makeLaunchArrow() {
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+    this.launchArrow = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 1.0, linewidth: 2, depthTest: false }));
+    this.launchArrow.renderOrder = 999;
+    this.launchArrow.visible = false;
+    this.scene.add(this.launchArrow);
+  }
+
+  _makeSelRing() {
+    this.selRing = new THREE.Mesh(new THREE.RingGeometry(1, 1.2, 48), new THREE.MeshBasicMaterial({ color: 0x00d4ff, side: THREE.DoubleSide, transparent: true, opacity: 0.6, depthTest: false }));
+    this.selRing.visible = false;
+    this.selRing.rotation.x = -Math.PI / 2;
+    this.scene.add(this.selRing);
+  }
+
+  _updateCam() {
+    this.camera.position.set(
+      this.camTarget.x + this.camDist * Math.sin(this.camPhi) * Math.cos(this.camTheta),
+      this.camTarget.y + this.camDist * Math.cos(this.camPhi),
+      this.camTarget.z + this.camDist * Math.sin(this.camPhi) * Math.sin(this.camTheta)
+    );
+    this.camera.lookAt(this.camTarget);
+  }
+
+  pan(dx, dz) {
+    var right = new THREE.Vector3();
+    right.crossVectors(this.camera.up, new THREE.Vector3().subVectors(this.camTarget, this.camera.position)).normalize();
+    var fwd = new THREE.Vector3().subVectors(this.camTarget, this.camera.position);
+    fwd.y = 0; fwd.normalize();
+    this.camTarget.add(right.multiplyScalar(-dx * this.camDist * 0.002));
+    this.camTarget.add(fwd.multiplyScalar(dz * this.camDist * 0.002));
+    this.followId = null;
+    this._updateCam();
+  }
+
+  orbit(dt, dp) {
+    this.camTheta += dt;
+    this.camPhi = Math.max(0.1, Math.min(Math.PI - 0.1, this.camPhi + dp));
+    this._updateCam();
+  }
+
+  zoom(f) {
+    this.camDist = Math.max(3, Math.min(50000, this.camDist * f));
+    this._updateCam();
+  }
+
+  follow(body) {
+    if (body) { this.followId = body.id; this.camTarget.set(body.px, body.py, body.pz); this._updateCam(); }
+  }
+
+  resetView() {
+    this.camTarget.set(0, 0, 0); this.camDist = 150; this.camPhi = Math.PI / 4; this.camTheta = 0; this.followId = null; this._updateCam();
+  }
+
+  worldPos(sx, sy) {
+    var ndc = new THREE.Vector2((sx / window.innerWidth) * 2 - 1, -(sy / window.innerHeight) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    var t = new THREE.Vector3();
+    this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), t);
+    return t;
+  }
+
+  hitTest(sx, sy, bodies) {
+    var ndc = new THREE.Vector2((sx / window.innerWidth) * 2 - 1, -(sy / window.innerHeight) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    var meshes = [], map = new Map();
+    for (var b of bodies) { var m = this.bodyMeshes.get(b.id); if (m) { meshes.push(m); map.set(m, b); } }
+    var hits = this.raycaster.intersectObjects(meshes);
+    return hits.length > 0 ? map.get(hits[0].object) : null;
+  }
+
+  sync(bodies, trails, selId) {
+    var ids = new Set();
+    for (var body of bodies) { ids.add(body.id); this._syncBody(body); if (trails && body.type !== "asteroid") this._syncTrail(body); }
+    var staleIds = [];
+    for (var [id] of this.bodyMeshes) { if (!ids.has(id)) staleIds.push(id); }
+    for (var si = 0; si < staleIds.length; si++) this._rm(staleIds[si]);
+    if (selId != null) {
+      var sb = bodies.find(function(b) { return b.id === selId; });
+      if (sb) { this.selRing.visible = true; this.selRing.position.set(sb.px, sb.py + 0.1, sb.pz); var sc = sb.radius * 2.5; this.selRing.scale.set(sc, sc, sc); }
+      else { this.selRing.visible = false; }
+    } else { this.selRing.visible = false; }
+    if (this.followId) {
+      var ft = bodies.find(function(b) { return b.id === this.followId; }.bind(this));
+      if (ft) { this.camTarget.set(ft.px, ft.py, ft.pz); this._updateCam(); } else { this.followId = null; }
+    }
+  }
+
+  _rm(id) {
+    var m = this.bodyMeshes.get(id); if (m) { this.scene.remove(m); if (m.material) m.material.dispose(); this.bodyMeshes.delete(id); }
+    var g = this.glowSprites.get(id); if (g) { this.scene.remove(g); if (g.material) { g.material.dispose(); } this.glowSprites.delete(id); }
+    var t = this.trailLines.get(id); if (t) { this.scene.remove(t); if (t.geometry) t.geometry.dispose(); if (t.material) t.material.dispose(); this.trailLines.delete(id); }
+    var d = this.accretionDisks.get(id); if (d) { this.scene.remove(d); if (d.geometry) d.geometry.dispose(); if (d.material) d.material.dispose(); this.accretionDisks.delete(id); }
+    var l = this.pointLights.get(id); if (l) { this.scene.remove(l); this.pointLights.delete(id); }
+    var lb = this.labelSprites.get(id); if (lb) { this.scene.remove(lb); if (lb.material) { if (lb.material.map) lb.material.map.dispose(); lb.material.dispose(); } this.labelSprites.delete(id); }
+  }
+
+  _syncBody(body) {
+    var mesh = this.bodyMeshes.get(body.id);
+    if (!mesh) {
+      var c = new THREE.Color(body.color);
+      var mat;
+      if (body.type === "star") {
+        mat = new THREE.MeshBasicMaterial({ color: c });
+      } else if (body.type === "black_hole") {
+        mat = new THREE.MeshBasicMaterial({ color: 0x050510 });
+      } else {
+        var emissiveColor = c.clone().multiplyScalar(0.35);
+        mat = new THREE.MeshStandardMaterial({ color: c, emissive: emissiveColor, emissiveIntensity: 0.6, roughness: 0.6, metalness: 0.2 });
+      }
+      var geo = body.type === "asteroid" ? this.lowSphereGeo : this.sphereGeo;
+      mesh = new THREE.Mesh(geo, mat);
+      this.bodyMeshes.set(body.id, mesh);
+      this.scene.add(mesh);
+      if (body.type === "star" || body.type === "black_hole") {
+        var gc = new THREE.Color(body.type === "black_hole" ? "#7c3aed" : body.color);
+        var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTexture, color: gc, transparent: true, opacity: body.type === "black_hole" ? 0.6 : 0.45, blending: THREE.AdditiveBlending, depthWrite: false }));
+        var gs = body.radius * (body.type === "black_hole" ? 10 : 6);
+        sp.scale.set(gs, gs, 1);
+        this.glowSprites.set(body.id, sp);
+        this.scene.add(sp);
+      }
+      if (body.type === "star" && this.pointLights.size < MAX_LIGHTS) {
+        var li = new THREE.PointLight(new THREE.Color(body.color), body.radius * 1.5, body.radius * 60);
+        this.pointLights.set(body.id, li);
+        this.scene.add(li);
+      }
+      if (body.type === "black_hole") {
+        var dg = new THREE.RingGeometry(body.radius * 2, body.radius * 7, 64);
+        var dm = new THREE.MeshBasicMaterial({ color: 0xff6600, side: THREE.DoubleSide, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
+        var dk = new THREE.Mesh(dg, dm);
+        dk.rotation.x = Math.PI / 2 + 0.2;
+        this.accretionDisks.set(body.id, dk);
+        this.scene.add(dk);
+      }
+    }
+    mesh.position.set(body.px, body.py, body.pz);
+    mesh.scale.setScalar(body.radius);
+    // LOD: swap geometry based on screen-space size
+    if (body.type !== "asteroid") {
+      var camDist2 = this.camera.position.distanceTo(mesh.position);
+      var screenRatio = body.radius / Math.max(camDist2, 1);
+      var wantGeo = screenRatio > 0.02 ? this.sphereGeoHigh : screenRatio > 0.004 ? this.sphereGeo : this.lowSphereGeo;
+      if (mesh.geometry !== wantGeo) mesh.geometry = wantGeo;
+    }
+    var glow = this.glowSprites.get(body.id);
+    if (glow) glow.position.set(body.px, body.py, body.pz);
+    var disk = this.accretionDisks.get(body.id);
+    if (disk) { disk.position.set(body.px, body.py, body.pz); disk.rotation.z += (body.diskSpeed || 0.008); }
+    var light = this.pointLights.get(body.id);
+    if (light) light.position.set(body.px, body.py, body.pz);
+    // Label sprite
+    var label = this.labelSprites.get(body.id);
+    if (body.name) {
+      if (!label || label.userData.labelText !== body.name) {
+        // Remove old label if name changed
+        if (label) { this.scene.remove(label); label.material.map.dispose(); label.material.dispose(); this.labelSprites.delete(body.id); }
+        var lt = this._makeLabelTex(body.name);
+        var lm = new THREE.SpriteMaterial({ map: lt.texture, transparent: true, opacity: 0.9, depthTest: false });
+        label = new THREE.Sprite(lm);
+        label.userData.labelText = body.name;
+        var labelH = body.radius * 1.2;
+        label.scale.set(labelH * lt.aspect, labelH, 1);
+        label.renderOrder = 1000;
+        this.labelSprites.set(body.id, label);
+        this.scene.add(label);
+      }
+      var labelH = body.radius * 1.2;
+      var lt2 = this.labelSprites.get(body.id);
+      label.position.set(body.px, body.py + body.radius * 1.8, body.pz);
+    } else if (label) {
+      this.scene.remove(label); label.material.map.dispose(); label.material.dispose(); this.labelSprites.delete(body.id);
+    }
+  }
+
+  _syncTrail(body) {
+    body.trail.push({ x: body.px, y: body.py, z: body.pz });
+    if (body.trail.length > TRAIL_LENGTH) body.trail.shift();
+    if (body.trail.length < 2) return;
+    var existing = this.trailLines.get(body.id);
+    if (!existing) {
+      // Pre-allocate geometry with max trail length
+      var posArr = new Float32Array(TRAIL_LENGTH * 3);
+      var colArr = new Float32Array(TRAIL_LENGTH * 3);
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(posArr, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(colArr, 3));
+      geo.setDrawRange(0, 0);
+      var line = new THREE.Line(geo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4, depthWrite: false }));
+      this.trailLines.set(body.id, line);
+      this.scene.add(line);
+      existing = line;
+    }
+    // Update positions and colors in-place
+    var posAttr = existing.geometry.attributes.position;
+    var colAttr = existing.geometry.attributes.color;
+    var tc = new THREE.Color(body.color);
+    var len = body.trail.length;
+    for (var i = 0; i < len; i++) {
+      var t = body.trail[i];
+      posAttr.array[i * 3] = t.x; posAttr.array[i * 3 + 1] = t.y; posAttr.array[i * 3 + 2] = t.z;
+      var a = i / len;
+      colAttr.array[i * 3] = tc.r * a; colAttr.array[i * 3 + 1] = tc.g * a; colAttr.array[i * 3 + 2] = tc.b * a;
+    }
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+    existing.geometry.setDrawRange(0, len);
+  }
+
+  showArrow(from, to) {
+    if (!from || !to) { this.launchArrow.visible = false; return; }
+    this.launchArrow.visible = true;
+    var p = this.launchArrow.geometry.attributes.position;
+    p.array[0] = from.x; p.array[1] = from.y; p.array[2] = from.z;
+    p.array[3] = to.x; p.array[4] = to.y; p.array[5] = to.z;
+    p.needsUpdate = true;
+  }
+
+  _makeTrajectoryLine() {
+    var maxVerts = 2000;
+    var pos = new Float32Array(maxVerts * 3);
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setDrawRange(0, 0);
+    this.trajectoryLine = new THREE.Line(geo, new THREE.LineDashedMaterial({
+      color: 0x00d4ff, transparent: true, opacity: 0.5, dashSize: 1.5, gapSize: 1,
+      depthWrite: false
+    }));
+    this.trajectoryLine.visible = false;
+    this.scene.add(this.trajectoryLine);
+  }
+
+  updateTrajectory(points) {
+    if (!points || points.length < 2) { this.hideTrajectory(); return; }
+    var posArr = this.trajectoryLine.geometry.attributes.position.array;
+    var count = Math.min(points.length, 2000);
+    for (var i = 0; i < count; i++) {
+      posArr[i * 3] = points[i].x;
+      posArr[i * 3 + 1] = points[i].y;
+      posArr[i * 3 + 2] = points[i].z;
+    }
+    this.trajectoryLine.geometry.attributes.position.needsUpdate = true;
+    this.trajectoryLine.geometry.setDrawRange(0, count);
+    this.trajectoryLine.computeLineDistances();
+    this.trajectoryLine.visible = true;
+  }
+
+  hideTrajectory() {
+    this.trajectoryLine.visible = false;
+  }
+
+  addExplosion(explosion) {
+    if (this.explosions.length >= 20) {
+      var old = this.explosions.shift();
+      this.scene.remove(old.points);
+      old.points.geometry.dispose();
+      old.points.material.dispose();
+    }
+    this.explosions.push(explosion);
+    this.scene.add(explosion.points);
+  }
+
+  updateExplosions(dt) {
+    for (var i = this.explosions.length - 1; i >= 0; i--) {
+      var ex = this.explosions[i];
+      ex.age += dt;
+      if (ex.age >= ex.lifetime) {
+        this.scene.remove(ex.points);
+        ex.points.geometry.dispose();
+        ex.points.material.dispose();
+        this.explosions.splice(i, 1);
+        continue;
+      }
+      var posArr = ex.points.geometry.attributes.position.array;
+      for (var j = 0; j < posArr.length / 3; j++) {
+        posArr[j * 3] += ex.vel[j * 3] * dt;
+        posArr[j * 3 + 1] += ex.vel[j * 3 + 1] * dt;
+        posArr[j * 3 + 2] += ex.vel[j * 3 + 2] * dt;
+      }
+      ex.points.geometry.attributes.position.needsUpdate = true;
+      ex.points.material.opacity = 1 - (ex.age / ex.lifetime);
+    }
+  }
+
+  render() { if (!this.contextLost) this.renderer.render(this.scene, this.camera); }
+  resize() { if (!this.contextLost) { this.camera.aspect = window.innerWidth / window.innerHeight; this.camera.updateProjectionMatrix(); this.renderer.setSize(window.innerWidth, window.innerHeight); } }
+  dispose() { this.renderer.dispose(); }
+}
+
+// ─── Error Boundary ───
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error: error };
+  }
+  componentDidCatch(error, info) {
+    console.error("Galaxy Sandbox crashed:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return React.createElement("div", {
+        style: { position: "fixed", inset: 0, background: "#0a0a1a", display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: "16px", fontFamily: "'Exo 2', sans-serif", color: "#e0e0e0" }
+      },
+        React.createElement("h1", { style: { fontSize: "24px", color: "#00d4ff" } }, "Something went wrong"),
+        React.createElement("p", { style: { color: "rgba(255,255,255,0.5)", maxWidth: "400px", textAlign: "center" } },
+          this.state.error ? this.state.error.message : "An unexpected error occurred."),
+        React.createElement("button", {
+          onClick: function() { window.location.reload(); },
+          style: { padding: "10px 24px", background: "rgba(0,212,255,0.15)", border: "1px solid rgba(0,212,255,0.4)",
+            borderRadius: "6px", color: "#00d4ff", cursor: "pointer", fontSize: "14px" }
+        }, "Reload Page")
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ─── React App ───
+var TOOLS = [
+  { id: "select", label: "Select", icon: "pointer" },
+  { id: "place", label: "Place Body", icon: "crosshair" },
+  { id: "launch", label: "Launch", icon: "rocket" },
+  { id: "delete", label: "Delete", icon: "trash" },
+];
+
+var SPEEDS = [
+  { label: "\u25C0 50x", value: -50 },
+  { label: "\u25C0 10x", value: -10 },
+  { label: "\u25C0 5x", value: -5 },
+  { label: "\u25C0 1x", value: -1 },
+  { label: "\u25C0 0.5x", value: -0.5 },
+  { label: "\u25C0 0.1x", value: -0.1 },
+  { label: "0.1x", value: 0.1 },
+  { label: "0.5x", value: 0.5 },
+  { label: "1x", value: 1 },
+  { label: "5x", value: 5 },
+  { label: "10x", value: 10 },
+  { label: "50x", value: 50 },
+];
+
+function App() {
+  var canvasRef = useRef(null);
+  var sceneRef = useRef(null);
+  var bodiesRef = useRef([]);
+  var animRef = useRef(null);
+  var accumRef = useRef(0);
+  var simTimeRef = useRef(0);
+  var mergeHistoryRef = useRef([]);
+
+  var _rt = useState(0); var renderTick = _rt[0]; var setRenderTick = _rt[1];
+  var bump = useCallback(function() { setRenderTick(function(n) { return n + 1; }); }, []);
+  var _s = useState(null); var selectedId = _s[0]; var setSelectedId = _s[1];
+  var _t = useState("select"); var activeTool = _t[0]; var setActiveTool = _t[1];
+  var _pt = useState("star"); var placeType = _pt[0]; var setPlaceType = _pt[1];
+  var _pm = useState(BODY_TYPES.star.defaultMass); var placeMass = _pm[0]; var setPlaceMass = _pm[1];
+  var _pr = useState(BODY_TYPES.star.defaultRadius); var placeRadius = _pr[0]; var setPlaceRadius = _pr[1];
+  var _p = useState(false); var isPaused = _p[0]; var setIsPaused = _p[1];
+  var _ts = useState(1); var timeScale = _ts[0]; var setTimeScale = _ts[1];
+  var _tr = useState(true); var showTrails = _tr[0]; var setShowTrails = _tr[1];
+  var _g = useState(G_DEFAULT); var gravityG = _g[0]; var setGravityG = _g[1];
+  var _ss = useState(false); var showSettings = _ss[0]; var setShowSettings = _ss[1];
+  var _tm = useState(false); var showTypeMenu = _tm[0]; var setShowTypeMenu = _tm[1];
+  var _sc = useState(true); var showScenarios = _sc[0]; var setShowScenarios = _sc[1];
+  var _pst = useState(null); var placeSubtype = _pst[0]; var setPlaceSubtype = _pst[1];
+  var _cm = useState("merge"); var collisionMode = _cm[0]; var setCollisionMode = _cm[1];
+  var _sp = useState(true); var showPrediction = _sp[0]; var setShowPrediction = _sp[1];
+  var _psl = useState(500); var predictionSteps = _psl[0]; var setPredictionSteps = _psl[1];
+  var _fps = useState(60); var fps = _fps[0]; var setFps = _fps[1];
+  var _simElapsed = useState(0); var simElapsed = _simElapsed[0]; var setSimElapsed = _simElapsed[1];
+  var _welcome = useState(!localStorage.getItem("galaxy-sandbox-welcomed")); var showWelcome = _welcome[0]; var setShowWelcome = _welcome[1];
+  var _sidebarOpen = useState(window.innerWidth > 768); var sidebarOpen = _sidebarOpen[0]; var setSidebarOpen = _sidebarOpen[1];
+  var fpsFrames = useRef(0);
+  var fpsTime = useRef(performance.now());
+
+  // Refs that mirror state for the animation loop (avoids loop re-creation)
+  var isPausedRef = useRef(isPaused);
+  var timeScaleRef = useRef(timeScale);
+  var gravityGRef = useRef(gravityG);
+  var showTrailsRef = useRef(showTrails);
+  var selectedIdRef = useRef(selectedId);
+  var collisionModeRef = useRef(collisionMode);
+  var showPredictionRef = useRef(showPrediction);
+  var predictionStepsRef = useRef(predictionSteps);
+  isPausedRef.current = isPaused;
+  timeScaleRef.current = timeScale;
+  gravityGRef.current = gravityG;
+  showTrailsRef.current = showTrails;
+  selectedIdRef.current = selectedId;
+  collisionModeRef.current = collisionMode;
+  showPredictionRef.current = showPrediction;
+  predictionStepsRef.current = predictionSteps;
+
+  // Undo/Redo — snapshot-based (stores full body arrays)
+  var undoStack = useRef([]);
+  var redoStack = useRef([]);
+  var MAX_UNDO = 50;
+
+  var pushUndo = useCallback(function() {
+    undoStack.current.push(JSON.stringify(bodiesRef.current.map(function(b) {
+      return { id: b.id, type: b.type, mass: b.mass, radius: b.radius, px: b.px, py: b.py, pz: b.pz, vx: b.vx, vy: b.vy, vz: b.vz, color: b.color, temperature: b.temperature, subtype: b.subtype, diskSpeed: b.diskSpeed, name: b.name };
+    })));
+    if (undoStack.current.length > MAX_UNDO) undoStack.current.shift();
+    redoStack.current = [];
+  }, []);
+
+  var undo = useCallback(function() {
+    if (undoStack.current.length === 0) return;
+    // Save current state for redo
+    redoStack.current.push(JSON.stringify(bodiesRef.current.map(function(b) {
+      return { id: b.id, type: b.type, mass: b.mass, radius: b.radius, px: b.px, py: b.py, pz: b.pz, vx: b.vx, vy: b.vy, vz: b.vz, color: b.color, temperature: b.temperature, subtype: b.subtype, diskSpeed: b.diskSpeed, name: b.name };
+    })));
+    var state = JSON.parse(undoStack.current.pop());
+    var sc = sceneRef.current;
+    if (sc) { var ids = Array.from(sc.bodyMeshes.keys()); for (var i = 0; i < ids.length; i++) sc._rm(ids[i]); }
+    bodiesRef.current = state.map(function(s) {
+      return { id: s.id, type: s.type, mass: s.mass, radius: s.radius, px: s.px, py: s.py, pz: s.pz, vx: s.vx, vy: s.vy, vz: s.vz, color: s.color, temperature: s.temperature, subtype: s.subtype, diskSpeed: s.diskSpeed, name: s.name, trail: [] };
+    });
+    bump();
+  }, [bump]);
+
+  var redo = useCallback(function() {
+    if (redoStack.current.length === 0) return;
+    undoStack.current.push(JSON.stringify(bodiesRef.current.map(function(b) {
+      return { id: b.id, type: b.type, mass: b.mass, radius: b.radius, px: b.px, py: b.py, pz: b.pz, vx: b.vx, vy: b.vy, vz: b.vz, color: b.color, temperature: b.temperature, subtype: b.subtype, diskSpeed: b.diskSpeed, name: b.name };
+    })));
+    var state = JSON.parse(redoStack.current.pop());
+    var sc = sceneRef.current;
+    if (sc) { var ids = Array.from(sc.bodyMeshes.keys()); for (var i = 0; i < ids.length; i++) sc._rm(ids[i]); }
+    bodiesRef.current = state.map(function(s) {
+      return { id: s.id, type: s.type, mass: s.mass, radius: s.radius, px: s.px, py: s.py, pz: s.pz, vx: s.vx, vy: s.vy, vz: s.vz, color: s.color, temperature: s.temperature, subtype: s.subtype, diskSpeed: s.diskSpeed, name: s.name, trail: [] };
+    });
+    bump();
+  }, [bump]);
+
+  var ms = useRef({ isDown: false, isDragging: false, startX: 0, startY: 0, button: -1, launchStart: null, lastClick: 0 });
+
+  var _wglErr = useState(null); var wglError = _wglErr[0]; var setWglError = _wglErr[1];
+
+  useEffect(function() {
+    if (!canvasRef.current) return;
+    try {
+      var sc = new SceneManager(canvasRef.current);
+      // Verify the context is actually usable
+      var gl = sc.renderer.getContext();
+      if (!gl || gl.isContextLost()) {
+        setWglError("WebGL context lost on init. Close other GPU-heavy tabs and reload.");
+        return;
+      }
+      sceneRef.current = sc;
+    } catch (e) {
+      console.error("SceneManager init failed:", e);
+      setWglError("WebGL initialization failed: " + e.message + ". Try closing other tabs or restarting your browser.");
+      return;
+    }
+    // Auto-load the Stable Solar System scenario on startup
+    var defaultPreset = SCENARIO_PRESETS[6]; // "Stable Solar System"
+    var result = defaultPreset.generate(G_DEFAULT);
+    bodiesRef.current = result.bodies.slice(0, MAX_BODIES);
+    bump();
+    if (result.camDist) {
+      sc.camDist = result.camDist;
+      sc.camPhi = Math.PI / 4;
+      sc._updateCam();
+    }
+    // Hide loading screen
+    var ls = document.getElementById("loading-screen");
+    if (ls) { ls.classList.add("fade-out"); setTimeout(function() { ls.remove(); }, 600); }
+    var onResize = function() { sc.resize(); };
+    window.addEventListener("resize", onResize);
+    return function() { window.removeEventListener("resize", onResize); if (animRef.current) cancelAnimationFrame(animRef.current); if (sceneRef.current) sceneRef.current.dispose(); };
+  }, []);
+
+  useEffect(function() {
+    var sc = sceneRef.current;
+    if (!sc) return;
+    var last = performance.now();
+    var trajFrame = 0;
+    function loop(now) {
+      animRef.current = requestAnimationFrame(loop);
+      var realDt = Math.min((now - last) / 1000, 0.1);
+      last = now;
+      var _isPaused = isPausedRef.current;
+      var _timeScale = timeScaleRef.current;
+      var _gravityG = gravityGRef.current;
+      var _collisionMode = collisionModeRef.current;
+      var _showTrails = showTrailsRef.current;
+      var _selectedId = selectedIdRef.current;
+      var _showPrediction = showPredictionRef.current;
+      var _predictionSteps = predictionStepsRef.current;
+      if (!_isPaused) {
+        if (_timeScale > 0) {
+          accumRef.current += realDt * _timeScale;
+          var steps = 0;
+          while (accumRef.current >= FIXED_DT && steps < 20) {
+            var result = stepPhysics(bodiesRef.current, FIXED_DT, _gravityG, _collisionMode);
+            bodiesRef.current = result.bodies;
+            simTimeRef.current += FIXED_DT;
+            for (var ci = 0; ci < result.collisions.length; ci++) {
+              var col = result.collisions[ci];
+              sc.addExplosion(createExplosion(col.x, col.y, col.z, col.color, col.energy));
+              if (col.survivorSnap && col.absorbedSnap) {
+                mergeHistoryRef.current.push({ time: simTimeRef.current, survivor: col.survivorSnap, absorbed: col.absorbedSnap });
+                if (mergeHistoryRef.current.length > 10000) mergeHistoryRef.current = mergeHistoryRef.current.slice(-5000);
+              }
+            }
+            accumRef.current -= FIXED_DT;
+            steps++;
+          }
+          if (steps >= 20) accumRef.current = FIXED_DT * 0.5;
+        } else {
+          // Rewind: step with negative dt, unmerge bodies
+          accumRef.current += realDt * (-_timeScale);
+          var steps = 0;
+          while (accumRef.current >= FIXED_DT && steps < 20) {
+            var result = stepPhysics(bodiesRef.current, -FIXED_DT, _gravityG, "disabled");
+            bodiesRef.current = result.bodies;
+            simTimeRef.current -= FIXED_DT;
+            // Check for merges to undo
+            while (mergeHistoryRef.current.length > 0 && mergeHistoryRef.current[mergeHistoryRef.current.length - 1].time > simTimeRef.current) {
+              var entry = mergeHistoryRef.current.pop();
+              // Revert survivor to pre-merge state
+              var survivor = bodiesRef.current.find(function(b) { return b.id === entry.survivor.id; });
+              if (survivor) {
+                survivor.mass = entry.survivor.mass;
+                survivor.radius = entry.survivor.radius;
+                survivor.px = entry.survivor.px; survivor.py = entry.survivor.py; survivor.pz = entry.survivor.pz;
+                survivor.vx = entry.survivor.vx; survivor.vy = entry.survivor.vy; survivor.vz = entry.survivor.vz;
+                survivor.color = entry.survivor.color;
+                survivor.temperature = entry.survivor.temperature;
+                survivor.subtype = entry.survivor.subtype;
+                survivor.diskSpeed = entry.survivor.diskSpeed;
+                survivor.name = entry.survivor.name;
+                sc._rm(survivor.id);
+              }
+              // Re-create absorbed body
+              var ab = entry.absorbed;
+              var restored = { id: ab.id, type: ab.type, mass: ab.mass, radius: ab.radius, px: ab.px, py: ab.py, pz: ab.pz, vx: ab.vx, vy: ab.vy, vz: ab.vz, color: ab.color, temperature: ab.temperature, subtype: ab.subtype, diskSpeed: ab.diskSpeed, name: ab.name, trail: [] };
+              bodiesRef.current.push(restored);
+            }
+            accumRef.current -= FIXED_DT;
+            steps++;
+          }
+          if (steps >= 20) accumRef.current = FIXED_DT * 0.5;
+        }
+      }
+      sc.updateExplosions(realDt);
+      // WASD+QE keyboard camera
+      var kd = keysDown.current;
+      if (kd.w || kd.a || kd.s || kd.d || kd.q || kd.e) {
+        var camSpeed = sc.camDist * 0.8 * realDt * (kd.shift ? 3 : 1);
+        if (kd.w) sc.pan(0, camSpeed * 2);
+        if (kd.s) sc.pan(0, -camSpeed * 2);
+        if (kd.a) sc.pan(-camSpeed * 2, 0);
+        if (kd.d) sc.pan(camSpeed * 2, 0);
+        if (kd.q) sc.orbit(realDt * 1.5, 0);
+        if (kd.e) sc.orbit(-realDt * 1.5, 0);
+      }
+      // Trajectory prediction
+      trajFrame++;
+      if (trajFrame % 5 === 0) {
+        if (_showPrediction && _selectedId != null && bodiesRef.current.length > 0) {
+          var pSteps = bodiesRef.current.length > 50 ? Math.min(_predictionSteps, 200) : _predictionSteps;
+          var traj = computeTrajectory(bodiesRef.current, _selectedId, Math.min(pSteps, 1999), FIXED_DT * 2, _gravityG);
+          sc.updateTrajectory(traj);
+        } else {
+          sc.hideTrajectory();
+        }
+      }
+      sc.sync(bodiesRef.current, _showTrails, _selectedId);
+      sc.render();
+      fpsFrames.current++;
+      if (now - fpsTime.current >= 1000) {
+        setFps(Math.round(fpsFrames.current * 1000 / (now - fpsTime.current)));
+        fpsFrames.current = 0;
+        fpsTime.current = now;
+        setSimElapsed(simTimeRef.current);
+      }
+      if (Math.floor(now / 250) !== Math.floor((now - realDt * 1000) / 250)) {
+        bump();
+      }
+    }
+    animRef.current = requestAnimationFrame(loop);
+    return function() { if (animRef.current) cancelAnimationFrame(animRef.current); };
+  }, []);
+
+  var addBodies = useCallback(function(nb) {
+    pushUndo();
+    bodiesRef.current = bodiesRef.current.concat(nb).slice(0, MAX_BODIES);
+    bump();
+  }, [bump, pushUndo]);
+
+  var clearAll = useCallback(function() {
+    pushUndo();
+    bodiesRef.current = [];
+    mergeHistoryRef.current = []; simTimeRef.current = 0;
+    setSelectedId(null); bump();
+    var sc = sceneRef.current;
+    if (sc) {
+      var trailIds = Array.from(sc.trailLines.keys());
+      for (var ti = 0; ti < trailIds.length; ti++) {
+        var tl = sc.trailLines.get(trailIds[ti]);
+        if (tl) { sc.scene.remove(tl); if (tl.geometry) tl.geometry.dispose(); if (tl.material) tl.material.dispose(); }
+      }
+      sc.trailLines.clear();
+      var meshIds = Array.from(sc.bodyMeshes.keys());
+      for (var mi = 0; mi < meshIds.length; mi++) sc._rm(meshIds[mi]);
+    }
+  }, [bump, pushUndo]);
+
+  var loadScenario = useCallback(function(preset) {
+    bodiesRef.current = [];
+    mergeHistoryRef.current = []; simTimeRef.current = 0;
+    setSelectedId(null);
+    var sc = sceneRef.current;
+    if (sc) {
+      // Collect IDs first to avoid modifying Map while iterating
+      var trailIds = Array.from(sc.trailLines.keys());
+      for (var ti = 0; ti < trailIds.length; ti++) {
+        var tl = sc.trailLines.get(trailIds[ti]);
+        if (tl) { sc.scene.remove(tl); if (tl.geometry) tl.geometry.dispose(); if (tl.material) tl.material.dispose(); }
+      }
+      sc.trailLines.clear();
+      var meshIds = Array.from(sc.bodyMeshes.keys());
+      for (var mi = 0; mi < meshIds.length; mi++) sc._rm(meshIds[mi]);
+    }
+    var result = preset.generate(gravityG);
+    bodiesRef.current = result.bodies.slice(0, MAX_BODIES);
+    bump();
+    if (sc && result.camDist) {
+      sc.camTarget.set(0, 0, 0);
+      sc.camDist = result.camDist;
+      sc.camPhi = Math.PI / 4;
+      sc.camTheta = 0;
+      sc.followId = null;
+      sc._updateCam();
+    }
+  }, [gravityG, bump]);
+
+  var removeBody = useCallback(function(id) {
+    pushUndo();
+    bodiesRef.current = bodiesRef.current.filter(function(b) { return b.id !== id; });
+    bump();
+    if (selectedId === id) setSelectedId(null);
+  }, [selectedId, bump, pushUndo]);
+
+  /** Serialize entire simulation to JSON and trigger download */
+  var saveState = useCallback(function() {
+    var now = new Date();
+    var data = {
+      version: 1,
+      timestamp: now.toISOString(),
+      settings: {
+        collisionMode: collisionMode,
+        softeningParameter: SOFTENING,
+        simulationSpeed: timeScale,
+        trailLength: TRAIL_LENGTH,
+        gravitationalConstant: gravityG
+      },
+      bodies: bodiesRef.current.map(function(b) {
+        return {
+          type: b.type, subtype: b.subtype, mass: b.mass, radius: b.radius,
+          position: { x: b.px, y: b.py, z: b.pz },
+          velocity: { x: b.vx, y: b.vy, z: b.vz },
+          color: b.color, temperature: b.temperature, diskSpeed: b.diskSpeed, name: b.name
+        };
+      })
+    };
+    var json = JSON.stringify(data, null, 2);
+    var blob = new Blob([json], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "galaxy-save-" + now.getFullYear() + "-" +
+      String(now.getMonth() + 1).padStart(2, "0") + "-" +
+      String(now.getDate()).padStart(2, "0") + "-" +
+      String(now.getHours()).padStart(2, "0") +
+      String(now.getMinutes()).padStart(2, "0") +
+      String(now.getSeconds()).padStart(2, "0") + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [collisionMode, timeScale, gravityG]);
+
+  /** Open file picker, parse JSON, and reconstruct simulation */
+  var loadState = useCallback(function() {
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = function(ev) {
+      var file = ev.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(re) {
+        try {
+          var data = JSON.parse(re.target.result);
+          if (!data.version || !Array.isArray(data.bodies)) {
+            alert("Invalid save file: missing version or bodies array.");
+            return;
+          }
+          var wasPaused = isPaused;
+          setIsPaused(true);
+          // Clear existing simulation
+          bodiesRef.current = [];
+          mergeHistoryRef.current = []; simTimeRef.current = 0;
+          setSelectedId(null);
+          var sc = sceneRef.current;
+          if (sc) {
+            var trailIds = Array.from(sc.trailLines.keys());
+            for (var ti = 0; ti < trailIds.length; ti++) {
+              var tl = sc.trailLines.get(trailIds[ti]);
+              if (tl) { sc.scene.remove(tl); if (tl.geometry) tl.geometry.dispose(); if (tl.material) tl.material.dispose(); }
+            }
+            sc.trailLines.clear();
+            var meshIds = Array.from(sc.bodyMeshes.keys());
+            for (var mi = 0; mi < meshIds.length; mi++) sc._rm(meshIds[mi]);
+          }
+          // Apply settings
+          if (data.settings) {
+            if (data.settings.collisionMode) setCollisionMode(data.settings.collisionMode);
+            if (data.settings.simulationSpeed != null) setTimeScale(data.settings.simulationSpeed);
+            if (data.settings.gravitationalConstant != null) setGravityG(data.settings.gravitationalConstant);
+          }
+          // Recreate bodies via existing pipeline
+          var newBodies = [];
+          for (var i = 0; i < data.bodies.length; i++) {
+            var bd = data.bodies[i];
+            var pos = bd.position || { x: 0, y: 0, z: 0 };
+            var vel = bd.velocity || { x: 0, y: 0, z: 0 };
+            newBodies.push(createBody(
+              bd.type || "star", bd.mass || 1, bd.radius || 1,
+              pos.x, pos.y, pos.z, vel.x, vel.y, vel.z,
+              { color: bd.color, temperature: bd.temperature, subtype: bd.subtype, diskSpeed: bd.diskSpeed, name: bd.name }
+            ));
+          }
+          bodiesRef.current = newBodies.slice(0, MAX_BODIES);
+          bump();
+          if (!wasPaused) setIsPaused(false);
+        } catch (err) {
+          alert("Failed to load save file: " + err.message);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }, [isPaused, bump]);
+
+  /** Clone the selected body with a slight positional offset */
+  var duplicateBody = useCallback(function() {
+    if (!selectedId) return;
+    var orig = bodiesRef.current.find(function(b) { return b.id === selectedId; });
+    if (!orig) return;
+    var offset = orig.radius * 2.5;
+    var newPx = orig.px + offset, newPy = orig.py, newPz = orig.pz;
+    // Try x-axis, then z-axis, then y-axis to avoid overlap
+    var wouldOverlap = function(px, py, pz) {
+      for (var i = 0; i < bodiesRef.current.length; i++) {
+        var b = bodiesRef.current[i];
+        var dx = b.px - px, dy = b.py - py, dz = b.pz - pz;
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < (b.radius + orig.radius)) return true;
+      }
+      return false;
+    };
+    if (wouldOverlap(newPx, newPy, newPz)) {
+      newPx = orig.px; newPz = orig.pz + offset;
+      if (wouldOverlap(newPx, newPy, newPz)) {
+        newPx = orig.px; newPz = orig.pz; newPy = orig.py + offset;
+      }
+    }
+    var clone = createBody(orig.type, orig.mass, orig.radius, newPx, newPy, newPz, orig.vx, orig.vy, orig.vz,
+      { color: orig.color, temperature: orig.temperature, subtype: orig.subtype, diskSpeed: orig.diskSpeed, name: orig.name ? orig.name + " (copy)" : "" });
+    addBodies([clone]);
+    setSelectedId(clone.id);
+  }, [selectedId, addBodies]);
+
+  // Keyboard shortcuts: Ctrl+D duplicate, WASD+QE camera, Space pause
+  var keysDown = useRef({});
+  useEffect(function() {
+    function onKeyDown(e) {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+        e.preventDefault();
+        duplicateBody();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (e.key === " ") { e.preventDefault(); setIsPaused(function(p) { return !p; }); return; }
+      keysDown.current[e.key.toLowerCase()] = true;
+    }
+    function onKeyUp(e) {
+      keysDown.current[e.key.toLowerCase()] = false;
+    }
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return function() { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); };
+  }, [duplicateBody, undo, redo]);
+
+  useEffect(function() {
+    var cfg = BODY_TYPES[placeType];
+    if (cfg) { setPlaceMass(cfg.defaultMass); setPlaceRadius(cfg.defaultRadius); }
+    if (SUBTYPES[placeType]) {
+      var keys = Object.keys(SUBTYPES[placeType]);
+      setPlaceSubtype(keys[0]);
+    } else {
+      setPlaceSubtype(null);
+    }
+  }, [placeType]);
+
+  var onDown = useCallback(function(e) {
+    if (e.target.closest(".ui-panel")) return;
+    var m = ms.current;
+    m.isDown = true; m.isDragging = false; m.startX = e.clientX; m.startY = e.clientY; m.button = e.button;
+    if (activeTool === "launch" && e.button === 0) {
+      var wp = sceneRef.current.worldPos(e.clientX, e.clientY);
+      if (wp) m.launchStart = wp.clone();
+    }
+  }, [activeTool]);
+
+  var onMove = useCallback(function(e) {
+    var m = ms.current;
+    if (!m.isDown) return;
+    if (Math.sqrt(Math.pow(e.clientX - m.startX, 2) + Math.pow(e.clientY - m.startY, 2)) > 5) m.isDragging = true;
+    var sc = sceneRef.current;
+    if (m.isDragging && m.button === 0 && activeTool !== "launch") sc.pan(-e.movementX, e.movementY);
+    else if (m.isDragging && m.button === 2) sc.orbit(e.movementX * 0.005, -e.movementY * 0.005);
+    else if (m.isDragging && m.button === 1) sc.pan(-e.movementX, e.movementY);
+    if (activeTool === "launch" && m.launchStart && m.button === 0) {
+      var wp = sc.worldPos(e.clientX, e.clientY);
+      if (wp) sc.showArrow(m.launchStart, wp);
+    }
+  }, [activeTool]);
+
+  var onUp = useCallback(function(e) {
+    if (e.target.closest(".ui-panel")) return;
+    var m = ms.current;
+    var sc = sceneRef.current;
+    if (!m.isDragging && m.button === 0) {
+      var now = Date.now();
+      var dbl = now - m.lastClick < 350;
+      m.lastClick = now;
+      if (activeTool === "select") {
+        var hit = sc.hitTest(e.clientX, e.clientY, bodiesRef.current);
+        if (hit) { if (dbl) sc.follow(hit); setSelectedId(hit.id); }
+        else setSelectedId(null);
+      } else if (activeTool === "place") {
+        var wp = sc.worldPos(e.clientX, e.clientY);
+        if (wp) addBodies([createBody(placeType, placeMass, placeRadius, wp.x, wp.y, wp.z, 0, 0, 0, { subtype: placeSubtype })]);
+      } else if (activeTool === "delete") {
+        var hit = sc.hitTest(e.clientX, e.clientY, bodiesRef.current);
+        if (hit) removeBody(hit.id);
+      }
+    }
+    if (activeTool === "launch" && m.launchStart && m.button === 0) {
+      var wp = sc.worldPos(e.clientX, e.clientY);
+      if (wp && m.isDragging) {
+        var vel = new THREE.Vector3().subVectors(wp, m.launchStart).multiplyScalar(0.3);
+        addBodies([createBody(placeType, placeMass, placeRadius, m.launchStart.x, m.launchStart.y, m.launchStart.z, vel.x, 0, vel.z, { subtype: placeSubtype })]);
+      }
+      sc.showArrow(null, null);
+      m.launchStart = null;
+    }
+    m.isDown = false; m.isDragging = false; m.button = -1;
+  }, [activeTool, placeType, placeMass, placeRadius, placeSubtype, addBodies, removeBody]);
+
+  var onWheel = useCallback(function(e) {
+    if (e.target.closest(".ui-panel")) return;
+    if (sceneRef.current) {
+      // Normalize deltaY across deltaMode (pixel, line, page)
+      var delta = e.deltaY;
+      if (e.deltaMode === 1) delta *= 30;
+      else if (e.deltaMode === 2) delta *= 300;
+      // Exponential zoom: smooth and proportional to scroll magnitude
+      // Clamp to prevent extreme jumps from fast trackpad flings
+      var exp = Math.max(-1.5, Math.min(1.5, delta * 0.003));
+      sceneRef.current.zoom(Math.exp(exp));
+    }
+  }, []);
+
+  var genSS = useCallback(function() { addBodies(generateSolarSystem(0, 0, 0, 0, 0, 0, gravityG)); }, [gravityG, addBodies]);
+  var genGal = useCallback(function() {
+    addBodies(generateGalaxy(0, 0, 0, gravityG));
+    if (sceneRef.current) { sceneRef.current.camDist = 600; sceneRef.current.camPhi = Math.PI / 5; sceneRef.current._updateCam(); }
+  }, [gravityG, addBodies]);
+
+  var selBody = useMemo(function() { return bodiesRef.current.find(function(b) { return b.id === selectedId; }); }, [renderTick, selectedId]);
+
+  var updSel = useCallback(function(field, val) {
+    if (!selectedId) return;
+    var b = bodiesRef.current.find(function(b) { return b.id === selectedId; });
+    if (!b) return;
+    b[field] = val;
+    // When temperature changes on a star, update color
+    if (field === "temperature" && b.type === "star") {
+      b.color = "#" + tempToColor(val).getHexString();
+      // Remove and recreate mesh to pick up new color
+      if (sceneRef.current) sceneRef.current._rm(b.id);
+    }
+    // When subtype changes, update color from the subtype palette
+    if (field === "subtype" && SUBTYPES[b.type] && SUBTYPES[b.type][val]) {
+      b.color = SUBTYPES[b.type][val].color;
+      if (sceneRef.current) sceneRef.current._rm(b.id);
+    }
+    // When color changes directly, rebuild mesh
+    if (field === "color") {
+      if (sceneRef.current) sceneRef.current._rm(b.id);
+    }
+    // When diskSpeed changes on black hole, update live
+    if (field === "diskSpeed") {
+      // Just stored on body, read each frame in _syncBody
+    }
+    bump();
+  }, [selectedId, bump]);
+
+  if (wglError) return (
+    <div className="w-full h-full flex items-center justify-center" style={{ background: "#0a0a1a" }}>
+      <div className="text-center max-w-md p-8">
+        <div className="text-red-400 text-xl mb-4">WebGL Error</div>
+        <div className="text-white/70 mb-4">{wglError}</div>
+        <button onClick={function() { setWglError(null); location.reload(); }}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded">Reload Page</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="w-full h-full relative select-none"
+      onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+      onWheel={onWheel} onContextMenu={function(e) { e.preventDefault(); }}>
+
+      <canvas ref={canvasRef} className="absolute inset-0" />
+
+      {/* Welcome overlay */}
+      {showWelcome && (
+        <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 1000, background: "rgba(5,5,20,0.85)", backdropFilter: "blur(8px)" }}>
+          <div className="glass-panel p-8 max-w-lg mx-4" style={{ border: "1px solid rgba(0,212,255,0.25)" }}>
+            <h2 className="text-2xl font-semibold mb-1" style={{ color: "#00d4ff" }}>Welcome to Galaxy Sandbox</h2>
+            <p className="text-white/50 text-sm mb-5">An interactive gravity simulation</p>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm mb-6">
+              <div><span className="text-white/80 font-medium">Left-click</span><br/><span className="text-white/40">Select / interact</span></div>
+              <div><span className="text-white/80 font-medium">Right-drag</span><br/><span className="text-white/40">Orbit camera</span></div>
+              <div><span className="text-white/80 font-medium">Scroll wheel</span><br/><span className="text-white/40">Zoom in/out</span></div>
+              <div><span className="text-white/80 font-medium">Double-click</span><br/><span className="text-white/40">Follow a body</span></div>
+              <div><span className="text-white/80 font-medium">WASD / QE</span><br/><span className="text-white/40">Pan and orbit</span></div>
+              <div><span className="text-white/80 font-medium">Space</span><br/><span className="text-white/40">Pause / resume</span></div>
+              <div><span className="text-white/80 font-medium">Ctrl+Z / Ctrl+Shift+Z</span><br/><span className="text-white/40">Undo / redo</span></div>
+              <div><span className="text-white/80 font-medium">Ctrl+D</span><br/><span className="text-white/40">Duplicate body</span></div>
+            </div>
+            <p className="text-white/40 text-xs mb-5">Use the toolbar on the left to place bodies, launch them, or try a preset scenario. Save your creations with the save button in the top bar.</p>
+            <div className="flex gap-3">
+              <button onClick={function() {
+                localStorage.setItem("galaxy-sandbox-welcomed", "1");
+                setShowWelcome(false);
+              }} className="flex-1 py-2 rounded text-sm font-medium" style={{ background: "rgba(0,212,255,0.15)", border: "1px solid rgba(0,212,255,0.4)", color: "#00d4ff", cursor: "pointer" }}>
+                Get Started
+              </button>
+              <button onClick={function() { setShowWelcome(false); }}
+                className="py-2 px-4 rounded text-sm text-white/40 hover:text-white/60" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer" }}>
+                Skip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top Bar */}
+      <div className="ui-panel absolute top-0 left-0 right-0 z-10">
+        <div className="glass-panel m-2 px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Icon name="sun" size={18} className="text-yellow-400" />
+            <span className="text-sm font-semibold tracking-wider text-white/90">GALAXY SANDBOX</span>
+            <span className="text-xs text-white/40 ml-2">{bodiesRef.current.length} bodies</span>
+            <span className={"text-xs ml-2 font-mono " + (fps >= 50 ? "text-green-400/60" : fps >= 30 ? "text-yellow-400/60" : "text-red-400/60")}>{fps} FPS</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={function() { setIsPaused(!isPaused); }} className="speed-btn px-3 py-1.5 rounded text-xs flex items-center gap-1" title={isPaused ? "Resume (Play)" : "Pause"}>
+              <Icon name={isPaused ? "play" : "pause"} size={14} />
+            </button>
+            {SPEEDS.map(function(s) {
+              var isActive = timeScale === s.value && !isPaused;
+              var cls = "speed-btn px-2 py-1 rounded text-xs ";
+              if (isActive && s.value < 0) cls += "bg-amber-500/30 text-amber-300 border border-amber-400/50";
+              else if (isActive) cls += "active";
+              else cls += "text-white/60";
+              return <button key={s.value} onClick={function() { setTimeScale(s.value); setIsPaused(false); }}
+                className={cls} title={"Speed: " + s.label}>{s.label}</button>;
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={saveState}
+              className="speed-btn px-2 py-1.5 rounded text-xs text-white/60 flex items-center gap-1" title="Save State">
+              <Icon name="save" size={14} />
+            </button>
+            <button onClick={loadState}
+              className="speed-btn px-2 py-1.5 rounded text-xs text-white/60 flex items-center gap-1" title="Load State">
+              <Icon name="upload" size={14} />
+            </button>
+            <button onClick={function() { if (sceneRef.current) sceneRef.current.resetView(); }}
+              className="speed-btn px-2 py-1.5 rounded text-xs text-white/60 flex items-center gap-1" title="Reset View">
+              <Icon name="maximize" size={14} />
+            </button>
+            <button onClick={function() { setShowSettings(!showSettings); }}
+              className={"speed-btn px-2 py-1.5 rounded text-xs flex items-center gap-1 " + (showSettings ? "active" : "text-white/60")}>
+              <Icon name="settings" size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Settings */}
+      {showSettings && (
+        <div className="ui-panel absolute top-14 right-2 z-20">
+          <div className="glass-panel p-4 w-56">
+            <h3 className="text-xs font-semibold text-white/70 uppercase tracking-wider mb-3">Settings</h3>
+            <div className="mb-3">
+              <label className="text-xs text-white/50 mb-1 block">Gravity (G): {gravityG.toFixed(1)}</label>
+              <input type="range" min="1" max="200" step="1" value={gravityG}
+                onChange={function(e) { setGravityG(parseFloat(e.target.value)); }} className="slider-cosmic w-full" />
+            </div>
+            <div className="mb-3">
+              <label className="flex items-center gap-2 text-xs text-white/50 cursor-pointer">
+                <input type="checkbox" checked={showTrails} onChange={function(e) { setShowTrails(e.target.checked); }} className="rounded" />
+                Show Orbital Trails
+              </label>
+            </div>
+            <div className="mb-3">
+              <label className="text-xs text-white/50 mb-1.5 block">Collision Mode</label>
+              <div className="flex rounded overflow-hidden border border-white/10">
+                {[["merge", "Merge"], ["bounce", "Bounce"], ["disabled", "Off"]].map(function(m) {
+                  return <button key={m[0]} onClick={function() { setCollisionMode(m[0]); }}
+                    className={"flex-1 px-2 py-1 text-[10px] font-medium transition " +
+                      (collisionMode === m[0] ? "bg-cyan-500/20 text-cyan-300 border-r border-cyan-500/30" : "text-white/50 hover:bg-white/5 border-r border-white/10 last:border-r-0")}>
+                    {m[1]}
+                  </button>;
+                })}
+              </div>
+            </div>
+            <button onClick={function() { if (bodiesRef.current.length === 0 || confirm("Clear all " + bodiesRef.current.length + " bodies? This cannot be undone.")) clearAll(); }}
+              className="w-full mt-2 px-3 py-1.5 rounded text-xs bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition">
+              Clear All Bodies
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sidebar toggle button */}
+      <button className="ui-panel absolute z-20 glass-panel flex items-center justify-center"
+        style={{ top: "60px", left: sidebarOpen ? "188px" : "8px", width: "24px", height: "24px", cursor: "pointer",
+          transition: "left 0.2s ease", border: "1px solid rgba(0,212,255,0.2)", borderRadius: "4px", background: "rgba(10,10,30,0.85)" }}
+        onClick={function() { setSidebarOpen(!sidebarOpen); }}>
+        <span className="text-white/50 text-xs">{sidebarOpen ? "\u25C0" : "\u25B6"}</span>
+      </button>
+      {/* Left Sidebar */}
+      <div className="ui-panel absolute top-16 left-2 z-10" style={{ maxHeight: "calc(100vh - 80px)", overflowY: "auto",
+        transform: sidebarOpen ? "translateX(0)" : "translateX(-200px)", transition: "transform 0.2s ease", pointerEvents: sidebarOpen ? "auto" : "none", opacity: sidebarOpen ? 1 : 0 }}>
+        <div className="glass-panel p-2 w-44">
+          <div className="mb-2">
+            <h3 className="text-[10px] font-semibold text-white/40 uppercase tracking-widest px-2 mb-1">Tools</h3>
+            {TOOLS.map(function(tool) {
+              return <button key={tool.id} onClick={function() { setActiveTool(tool.id); }}
+                className={"tool-btn w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs " + (activeTool === tool.id ? "active text-cyan-300" : "text-white/70")}>
+                <Icon name={tool.icon} size={14} /> {tool.label}
+              </button>;
+            })}
+          </div>
+
+          {(activeTool === "place" || activeTool === "launch") && (
+            <div className="border-t border-white/10 pt-2 mt-2">
+              <h3 className="text-[10px] font-semibold text-white/40 uppercase tracking-widest px-2 mb-1">Body Type</h3>
+              <button onClick={function() { setShowTypeMenu(!showTypeMenu); }}
+                className="tool-btn w-full flex items-center justify-between px-2 py-1.5 rounded text-xs text-white/70">
+                <span className="flex items-center gap-2">
+                  <Icon name={BODY_TYPES[placeType].icon} size={14} />
+                  {BODY_TYPES[placeType].label}
+                </span>
+                <Icon name={showTypeMenu ? "chevUp" : "chevDown"} size={12} />
+              </button>
+              {showTypeMenu && (
+                <div className="mt-1">
+                  {Object.entries(BODY_TYPES).map(function(entry) {
+                    var key = entry[0], cfg = entry[1];
+                    return <button key={key} onClick={function() { setPlaceType(key); setShowTypeMenu(false); }}
+                      className={"tool-btn w-full flex items-center gap-2 px-2 py-1 rounded text-xs " + (placeType === key ? "active text-cyan-300" : "text-white/60")}>
+                      <Icon name={cfg.icon} size={12} /> {cfg.label}
+                    </button>;
+                  })}
+                </div>
+              )}
+              <div className="mt-2 px-2">
+                <label className="text-[10px] text-white/40 block mb-1">Mass: {fmtUnit(placeMass, "mass", placeType)}</label>
+                <input type="range" min={BODY_TYPES[placeType].minMass} max={BODY_TYPES[placeType].maxMass}
+                  step={(BODY_TYPES[placeType].maxMass - BODY_TYPES[placeType].minMass) / 100}
+                  value={placeMass} onChange={function(e) { setPlaceMass(parseFloat(e.target.value)); }} className="slider-cosmic w-full" />
+              </div>
+              <div className="mt-1 px-2">
+                <label className="text-[10px] text-white/40 block mb-1">Radius: {fmtUnit(placeRadius, "radius", placeType)}</label>
+                <input type="range" min={BODY_TYPES[placeType].minRadius} max={BODY_TYPES[placeType].maxRadius}
+                  step={0.01} value={placeRadius} onChange={function(e) { setPlaceRadius(parseFloat(e.target.value)); }} className="slider-cosmic w-full" />
+              </div>
+              {SUBTYPES[placeType] && (
+                <div className="mt-2 px-2">
+                  <label className="text-[10px] text-white/40 block mb-1">Subtype</label>
+                  <div className="flex flex-wrap gap-1">
+                    {Object.entries(SUBTYPES[placeType]).map(function(entry) {
+                      var key = entry[0], sub = entry[1];
+                      return <button key={key} onClick={function() { setPlaceSubtype(key); }}
+                        className={"flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border " + (placeSubtype === key ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-300" : "border-white/10 text-white/50 hover:border-white/30")}>
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sub.color }} />
+                        {sub.label}
+                      </button>;
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="border-t border-white/10 pt-2 mt-2">
+            <h3 className="text-[10px] font-semibold text-white/40 uppercase tracking-widest px-2 mb-1">Generate</h3>
+            <button onClick={genSS}
+              className="tool-btn w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-white/70">
+              <Icon name="orbit" size={14} /> Solar System
+            </button>
+            <button onClick={genGal}
+              className="tool-btn w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-purple-300">
+              <Icon name="sparkles" size={14} /> Spiral Galaxy
+            </button>
+          </div>
+
+          <div className="border-t border-white/10 pt-2 mt-2">
+            <button onClick={function() { setShowScenarios(!showScenarios); }}
+              className="w-full flex items-center justify-between px-2 mb-1">
+              <h3 className="text-[10px] font-semibold text-white/40 uppercase tracking-widest">Scenarios</h3>
+              <Icon name={showScenarios ? "chevUp" : "chevDown"} size={12} className="text-white/30" />
+            </button>
+            {showScenarios && SCENARIO_PRESETS.map(function(preset, idx) {
+              return <button key={idx} onClick={function() { loadScenario(preset); }}
+                className="tool-btn w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-white/70" title={preset.description}>
+                <Icon name={preset.icon} size={14} /> {preset.name}
+              </button>;
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Selection Panel */}
+      {selBody && (
+        <div className="ui-panel absolute bottom-2 left-2 z-10">
+          <div className="glass-panel p-3 w-64" style={{ maxHeight: "80vh", overflowY: "auto" }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: selBody.color }} />
+                <span className="text-xs font-semibold text-white/90">{BODY_TYPES[selBody.type] ? BODY_TYPES[selBody.type].label : selBody.type}</span>
+                {selBody.subtype && SUBTYPES[selBody.type] && SUBTYPES[selBody.type][selBody.subtype] && (
+                  <span className="text-[9px] text-white/40">({SUBTYPES[selBody.type][selBody.subtype].label})</span>
+                )}
+              </div>
+              <div className="flex gap-1">
+                <button onClick={function() { if (sceneRef.current) sceneRef.current.follow(selBody); }} className="p-1 rounded hover:bg-white/10" title="Follow">
+                  <Icon name="eye" size={12} />
+                </button>
+                <button onClick={function() { setSelectedId(null); }} className="p-1 rounded hover:bg-white/10">
+                  <Icon name="x" size={12} />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1.5 text-[10px] text-white/60">
+              <div className="flex justify-between"><span>ID</span><span className="text-white/40">#{selBody.id}</span></div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-white/40">Name</span>
+                <input type="text" maxLength={30} value={selBody.name || ""} placeholder="Unnamed"
+                  onChange={function(e) { updSel("name", e.target.value); }}
+                  className="flex-1 bg-white/5 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white/80 outline-none focus:border-cyan-400/40"
+                  onClick={function(e) { e.stopPropagation(); }} />
+              </div>
+              <div>
+                <div className="flex justify-between mb-0.5"><span>Mass</span><span>{fmtUnit(selBody.mass, "mass", selBody.type)}</span></div>
+                <input type="range" min={BODY_TYPES[selBody.type] ? BODY_TYPES[selBody.type].minMass : 0.001}
+                  max={BODY_TYPES[selBody.type] ? BODY_TYPES[selBody.type].maxMass : 200000}
+                  step={((BODY_TYPES[selBody.type] ? BODY_TYPES[selBody.type].maxMass : 200000) - (BODY_TYPES[selBody.type] ? BODY_TYPES[selBody.type].minMass : 0.001)) / 200}
+                  value={selBody.mass} onChange={function(e) { updSel("mass", parseFloat(e.target.value)); }} className="slider-cosmic w-full" />
+              </div>
+              <div>
+                <div className="flex justify-between mb-0.5"><span>Radius</span><span>{fmtUnit(selBody.radius, "radius", selBody.type)}</span></div>
+                <input type="range" min={BODY_TYPES[selBody.type] ? BODY_TYPES[selBody.type].minRadius : 0.05}
+                  max={BODY_TYPES[selBody.type] ? BODY_TYPES[selBody.type].maxRadius : 8}
+                  step={0.01} value={selBody.radius} onChange={function(e) { updSel("radius", parseFloat(e.target.value)); }} className="slider-cosmic w-full" />
+              </div>
+              <div className="flex justify-between"><span>Position</span><span>({selBody.px.toFixed(1)}, {selBody.py.toFixed(1)}, {selBody.pz.toFixed(1)}) u</span></div>
+              <div className="flex justify-between"><span>Speed</span><span>{Math.sqrt(selBody.vx * selBody.vx + selBody.vy * selBody.vy + selBody.vz * selBody.vz).toFixed(2)} u/s</span></div>
+
+              {/* ─── Velocity Editor ─── */}
+              <div className="border-t border-white/10 pt-1.5 mt-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-white/40">Velocity</span>
+                  <button onClick={function() { updSel("vx", 0); updSel("vy", 0); updSel("vz", 0); }}
+                    className="px-1.5 py-0.5 rounded text-[9px] border border-white/10 text-white/40 hover:border-white/30 hover:text-white/60 transition"
+                    title="Zero velocity">
+                    <Icon name="stop" size={10} /> Zero
+                  </button>
+                </div>
+                {[["vx", "X"], ["vy", "Y"], ["vz", "Z"]].map(function(v) {
+                  var maxV = Math.min(VEL_CAP, Math.max(10, Math.abs(selBody[v[0]]) * 1.5));
+                  return <div key={v[0]} className="flex items-center gap-1.5 mb-0.5">
+                    <span className="w-3 text-white/30 text-right">{v[1]}</span>
+                    <input type="range" min={-maxV} max={maxV} step={0.01} value={selBody[v[0]]}
+                      onChange={function(e) { updSel(v[0], parseFloat(e.target.value)); }} className="slider-cosmic flex-1" />
+                    <span className="w-14 text-right text-white/40">{selBody[v[0]].toFixed(1)} u/s</span>
+                  </div>;
+                })}
+              </div>
+
+              {/* ─── Orbit Prediction ─── */}
+              <div className="border-t border-white/10 pt-1.5 mt-1">
+                <label className="flex items-center gap-2 text-[10px] text-white/50 cursor-pointer mb-1">
+                  <input type="checkbox" checked={showPrediction} onChange={function(e) { setShowPrediction(e.target.checked); }} className="rounded" />
+                  Orbit Prediction
+                </label>
+                {showPrediction && (
+                  <div>
+                    <div className="flex justify-between mb-0.5 text-white/30"><span>Steps</span><span>{predictionSteps}</span></div>
+                    <input type="range" min="100" max="2000" step="50" value={predictionSteps}
+                      onChange={function(e) { setPredictionSteps(parseInt(e.target.value)); }} className="slider-cosmic w-full" />
+                  </div>
+                )}
+              </div>
+
+              {/* ─── Orbital Elements ─── */}
+              {bodiesRef.current.length > 1 && (function() {
+                var oe = computeOrbitalElements(selBody, bodiesRef.current, gravityG);
+                if (!oe) return null;
+                return <div className="border-t border-white/10 pt-1.5 mt-1">
+                  <div className="text-white/40 mb-1">Orbit around {oe.centralName}</div>
+                  <div className="flex justify-between"><span>Eccentricity</span><span>{oe.ecc.toFixed(3)}</span></div>
+                  {oe.bound ? <div>
+                    <div className="flex justify-between"><span>Semi-major axis</span><span>{oe.semiMajor.toFixed(1)} u</span></div>
+                    <div className="flex justify-between"><span>Periapsis</span><span>{oe.periapsis.toFixed(1)} u</span></div>
+                    <div className="flex justify-between"><span>Apoapsis</span><span>{oe.apoapsis.toFixed(1)} u</span></div>
+                    <div className="flex justify-between"><span>Period</span><span>{oe.period < 60 ? oe.period.toFixed(1) + "s" : (oe.period / 60).toFixed(1) + "m"}</span></div>
+                  </div> : <div className="text-amber-400/50 text-[9px]">Unbound (hyperbolic)</div>}
+                </div>;
+              })()}
+
+              {/* ─── Star-specific controls ─── */}
+              {selBody.type === "star" && (
+                <div className="border-t border-white/10 pt-1.5 mt-1">
+                  <div className="flex justify-between mb-0.5"><span>Temperature</span><span>{selBody.temperature.toFixed(0)} K</span></div>
+                  <input type="range" min="2500" max="35000" step="100"
+                    value={selBody.temperature} onChange={function(e) { updSel("temperature", parseFloat(e.target.value)); }} className="slider-cosmic w-full" />
+                  <div className="flex justify-between mt-1 mb-0.5"><span>Color Preview</span>
+                    <div className="flex gap-0.5">
+                      {[3000, 5000, 6000, 8000, 15000, 30000].map(function(t) {
+                        return <button key={t} onClick={function() { updSel("temperature", t); }}
+                          className="w-3 h-3 rounded-full border border-white/20 hover:border-white/50"
+                          style={{ backgroundColor: "#" + tempToColor(t).getHexString() }}
+                          title={t + " K"} />;
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ─── Black Hole-specific controls ─── */}
+              {selBody.type === "black_hole" && (
+                <div className="border-t border-white/10 pt-1.5 mt-1">
+                  <div className="flex justify-between mb-0.5"><span>Disk Spin Speed</span><span>{(selBody.diskSpeed * 1000).toFixed(1)}</span></div>
+                  <input type="range" min="1" max="50" step="0.5"
+                    value={selBody.diskSpeed * 1000} onChange={function(e) { updSel("diskSpeed", parseFloat(e.target.value) / 1000); }} className="slider-cosmic w-full" />
+                </div>
+              )}
+
+              {/* ─── Rocky Planet subtypes ─── */}
+              {selBody.type === "planet_rocky" && SUBTYPES.planet_rocky && (
+                <div className="border-t border-white/10 pt-1.5 mt-1">
+                  <div className="text-white/40 mb-1">Surface Type</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {Object.entries(SUBTYPES.planet_rocky).map(function(entry) {
+                      var key = entry[0], sub = entry[1];
+                      return <button key={key} onClick={function() { updSel("subtype", key); }}
+                        className={"px-1.5 py-1 rounded text-[9px] border " + (selBody.subtype === key ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-300" : "border-white/10 text-white/50 hover:border-white/30")}>
+                        <div className="w-2 h-2 rounded-full mx-auto mb-0.5" style={{ backgroundColor: sub.color }} />
+                        {sub.label}
+                      </button>;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ─── Gas Giant subtypes ─── */}
+              {selBody.type === "planet_gas" && SUBTYPES.planet_gas && (
+                <div className="border-t border-white/10 pt-1.5 mt-1">
+                  <div className="text-white/40 mb-1">Gas Type</div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {Object.entries(SUBTYPES.planet_gas).map(function(entry) {
+                      var key = entry[0], sub = entry[1];
+                      return <button key={key} onClick={function() { updSel("subtype", key); }}
+                        className={"px-1.5 py-1 rounded text-[9px] border " + (selBody.subtype === key ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-300" : "border-white/10 text-white/50 hover:border-white/30")}>
+                        <div className="w-2 h-2 rounded-full mx-auto mb-0.5" style={{ backgroundColor: sub.color }} />
+                        {sub.label}
+                      </button>;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ─── Moon subtypes ─── */}
+              {selBody.type === "moon" && SUBTYPES.moon && (
+                <div className="border-t border-white/10 pt-1.5 mt-1">
+                  <div className="text-white/40 mb-1">Surface Type</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {Object.entries(SUBTYPES.moon).map(function(entry) {
+                      var key = entry[0], sub = entry[1];
+                      return <button key={key} onClick={function() { updSel("subtype", key); }}
+                        className={"px-1.5 py-1 rounded text-[9px] border " + (selBody.subtype === key ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-300" : "border-white/10 text-white/50 hover:border-white/30")}>
+                        <div className="w-2 h-2 rounded-full mx-auto mb-0.5" style={{ backgroundColor: sub.color }} />
+                        {sub.label}
+                      </button>;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ─── Asteroid subtypes ─── */}
+              {selBody.type === "asteroid" && SUBTYPES.asteroid && (
+                <div className="border-t border-white/10 pt-1.5 mt-1">
+                  <div className="text-white/40 mb-1">Composition</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {Object.entries(SUBTYPES.asteroid).map(function(entry) {
+                      var key = entry[0], sub = entry[1];
+                      return <button key={key} onClick={function() { updSel("subtype", key); }}
+                        className={"px-1.5 py-1 rounded text-[9px] border " + (selBody.subtype === key ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-300" : "border-white/10 text-white/50 hover:border-white/30")}>
+                        <div className="w-2 h-2 rounded-full mx-auto mb-0.5" style={{ backgroundColor: sub.color }} />
+                        {sub.label}
+                      </button>;
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 mt-2">
+              <button onClick={duplicateBody}
+                className="flex-1 px-2 py-1 rounded text-[10px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition flex items-center justify-center gap-1"
+                title="Duplicate (Ctrl+D)">
+                <Icon name="copy" size={10} /> Duplicate
+              </button>
+              <button onClick={function() { removeBody(selBody.id); }}
+                className="flex-1 px-2 py-1 rounded text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom-right: sim clock + scale bar + controls hint */}
+      <div className="absolute bottom-2 right-2 z-10 pointer-events-none text-right">
+        <div className="glass-panel inline-block px-3 py-1.5 mb-1 text-[10px]">
+          <span className="text-white/50">T = </span>
+          <span className="text-cyan-300/70 font-mono">{
+            (function() {
+              var t = Math.abs(simElapsed);
+              if (t < 60) return t.toFixed(1) + "s";
+              if (t < 3600) return (t / 60).toFixed(1) + "m";
+              if (t < 86400) return (t / 3600).toFixed(1) + "h";
+              return (t / 86400).toFixed(1) + "d";
+            })()
+          }</span>
+          <span className="text-white/30 mx-2">|</span>
+          <span className="text-white/50">Zoom: </span>
+          <span className="text-white/40 font-mono">{
+            sceneRef.current ? (sceneRef.current.camDist < 100 ? sceneRef.current.camDist.toFixed(0) + " u" :
+              sceneRef.current.camDist < 10000 ? (sceneRef.current.camDist / 1000).toFixed(1) + " ku" :
+              (sceneRef.current.camDist / 1000).toFixed(0) + " ku") : "—"
+          }</span>
+        </div>
+        <div className="text-[9px] text-white/15">
+          WASD: pan {"\u00B7"} QE: orbit {"\u00B7"} Scroll: zoom {"\u00B7"} Space: pause {"\u00B7"} Right-drag: orbit
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
+
+  </script>
+</body>
+</html>
